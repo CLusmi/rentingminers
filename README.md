@@ -3,9 +3,10 @@
 Image Docker pour miner sur des machines louées (vast.ai, Clore.ai…) :
 
 - **GPU NVIDIA** : SRBMiner-MULTI ;
-- **CPU** : XMRig ou SRBMiner-MULTI, en option.
+- **CPU** : XMRig ou SRBMiner-MULTI.
 
-Les arguments des mineurs sont donnés **tels quels**, dans leur syntaxe d'origine.
+GPU seul, CPU seul ou les deux : **rien ne démarre sans choix explicite**. Les arguments
+des mineurs sont donnés **tels quels**, dans leur syntaxe d'origine.
 Image publiée : `clusmi/rentingminers:latest` (publique).
 
 ## Comment l'image est construite
@@ -35,16 +36,30 @@ Pour récupérer de nouvelles versions des mineurs, relance simplement le workfl
 
 | Variable | Valeurs | Rôle |
 |---|---|---|
-| `GPU_MINER` | `srbminer` (défaut, seule valeur) | XMRig ne mine que sur CPU |
-| `GPU_ARGS` | **obligatoire** | arguments SRBMiner, tels quels |
-| `CPU_MINER` | `xmrig` (défaut) ou `srbminer` | |
-| `CPU_ARGS` | vide = pas de minage CPU | arguments du mineur CPU, tels quels |
+| `GPU_MINER` | `srbminer` (seule valeur) | XMRig ne mine que sur CPU |
+| `GPU_ARGS` | | arguments SRBMiner, tels quels |
+| `CPU_MINER` | `xmrig` ou `srbminer` | |
+| `CPU_ARGS` | | arguments du mineur CPU, tels quels |
 | `RESTART_DELAY` | `10` | secondes avant relance d'un mineur qui s'arrête |
 | `DRY_RUN` | | `1` : affiche les commandes finales sans miner |
 
-Une valeur avec des espaces se met entre guillemets dans les options Docker du template :
-`-e GPU_ARGS="--algorithm pearlhash --pool ... --wallet ..."`. Des guillemets à
-l'intérieur de la valeur marchent aussi (`--password "mot de passe"`).
+Aucun mineur n'est prérempli. Un côté démarre seulement si **son mineur et ses arguments**
+sont renseignés tous les deux :
+
+| `GPU_MINER` + `GPU_ARGS` | `CPU_MINER` + `CPU_ARGS` | Résultat |
+|---|---|---|
+| renseignés | vides | GPU seul |
+| vides | renseignés | CPU seul |
+| renseignés | renseignés | GPU + CPU |
+| vides | vides | erreur « rien a miner » |
+| l'un sans l'autre | | erreur, rien ne démarre |
+
+Dans le template vast.ai, le plus simple est la section **Environment Variables** : une
+case pour le nom, une pour la valeur, **sans guillemets**. Dans le champ « Docker
+Options », la syntaxe est `-e GPU_ARGS="--algorithm pearlhash --pool ... --wallet ..."`,
+avec le `-e` et des guillemets autour de la valeur. Si vast.ai garde ces guillemets dans
+la valeur, l'image les retire. Des guillemets à l'intérieur de la valeur marchent aussi
+(`--password "mot de passe"`).
 
 ### Ce que l'image ajoute automatiquement
 
@@ -78,6 +93,20 @@ CPU_MINER=xmrig
 CPU_ARGS=--coin monero -o xmr.kryptex.network:7029 -u ADRESSE_MONERO/RENT -t 184 -k
 ```
 
+**Pearl seul (GPU)** :
+
+```
+GPU_MINER=srbminer
+GPU_ARGS=--algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE_PEARL --worker FARM
+```
+
+**DragonX seul (CPU, SRBMiner)** :
+
+```
+CPU_MINER=srbminer
+CPU_ARGS=--algorithm randomdrgx --pool POOL:PORT --wallet ADRESSE_DRAGONX.RENT --cpu-threads 180
+```
+
 **Pearl (GPU) + DragonX (CPU, SRBMiner)** :
 
 ```
@@ -98,7 +127,8 @@ Quelques algorithmes CPU de SRBMiner (liste complète sur sa page GitHub) : `ran
 - **Image Path:Tag** : `clusmi/rentingminers`, version `latest`
 - **Launch mode** : **Docker ENTRYPOINT**
 - **Champ des arguments** : **vide**
-- **Environment Variables** : `GPU_ARGS`, et `CPU_MINER` + `CPU_ARGS` pour le CPU
+- **Environment Variables** : `GPU_MINER` + `GPU_ARGS` pour le GPU, `CPU_MINER` + `CPU_ARGS`
+  pour le CPU (l'un, l'autre ou les deux)
 - **Après une reconstruction de l'image** : une location ne prend la nouvelle version que
   si son conteneur est recréé (`recycle`, ou le menu 2 de Vast-Switch-Log) ; un simple
   `reboot` garde l'ancienne.
@@ -118,7 +148,10 @@ Quelques algorithmes CPU de SRBMiner (liste complète sur sa page GitHub) : `ran
 
 ## Dépannage
 
-- **`GPU_ARGS est obligatoire`** : la variable manque ou est vide.
+- **`rien a miner`** : aucun côté n'est complet. Il faut `GPU_MINER` + `GPU_ARGS` et/ou
+  `CPU_MINER` + `CPU_ARGS`.
+- **`CPU_ARGS est renseigne mais CPU_MINER manque`** (et variantes) : un côté a l'une de
+  ses deux variables sans l'autre ; complète-le ou vide les deux.
 - **`variables d'une ancienne version detectees`** : le template utilise les anciens noms
   (`MINER`, `POOL`, `WALLET`, `CPU_POOL`…). Mets-le à jour avec `GPU_ARGS` / `CPU_ARGS`.
 - **`guillemet non ferme`** : un guillemet ouvert dans `GPU_ARGS` ou `CPU_ARGS` sans son

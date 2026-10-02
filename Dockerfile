@@ -1,6 +1,7 @@
 # Image de minage pour GPU loues (vast.ai, Clore.ai...) :
-#   - GPU NVIDIA : SRBMiner-MULTI (GPU_ARGS)
-#   - CPU        : XMRig ou SRBMiner-MULTI, optionnel (CPU_MINER, CPU_ARGS)
+#   - GPU NVIDIA : SRBMiner-MULTI (GPU_MINER, GPU_ARGS)
+#   - CPU        : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)
+# Un cote ne demarre que si son mineur ET ses arguments sont renseignes.
 #
 # Les versions, URL et empreintes sont fournies par le workflow GitHub
 # (scripts/resolve-versions.sh). Chaque archive est telechargee depuis la page
@@ -52,8 +53,6 @@ RUN chmod 0755 /usr/local/bin/entrypoint.sh \
 
 ENV NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    GPU_MINER=srbminer \
-    CPU_MINER=xmrig \
     RESTART_DELAY=10
 
 LABEL org.opencontainers.image.title="rentingminers" \
