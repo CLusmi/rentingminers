@@ -152,8 +152,11 @@ Quelques algorithmes CPU de SRBMiner (liste complète sur sa page GitHub) : `ran
   `CPU_MINER` + `CPU_ARGS`.
 - **`CPU_ARGS est renseigne mais CPU_MINER manque`** (et variantes) : un côté a l'une de
   ses deux variables sans l'autre ; complète-le ou vide les deux.
-- **`variables d'une ancienne version detectees`** : le template utilise les anciens noms
-  (`MINER`, `POOL`, `WALLET`, `CPU_POOL`…). Mets-le à jour avec `GPU_ARGS` / `CPU_ARGS`.
+- **`variables d'une ancienne version ignorees`** : le conteneur reçoit aussi les anciens
+  noms (`MINER`, `POOL`, `WALLET`, `CPU_POOL`…). Vast.ai réinjecte parfois les variables du
+  template d'origine d'une location ; elles sont ignorées, seules `GPU_MINER`, `GPU_ARGS`,
+  `CPU_MINER` et `CPU_ARGS` comptent. La ligne `Variables recues` dit lesquelles sont
+  arrivées.
 - **`guillemet non ferme`** : un guillemet ouvert dans `GPU_ARGS` ou `CPU_ARGS` sans son
   guillemet fermant.
 - **Hashrate CPU très bas** : cherche `slow mode` (XMRig) dans les logs, et vérifie que la

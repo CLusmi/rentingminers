@@ -41,14 +41,23 @@ fi
 
 log "Versions installees : $(tr '\n' ' ' < "$MINERS_DIR/VERSIONS")"
 
-# --- Anciennes variables (versions precedentes de l'image) ---------------------
+# --- Variables recues ------------------------------------------------------------
+# Vast.ai peut injecter, en plus du template, les variables du template d'origine
+# de la location. Les anciens noms sont donc ignores (avec un avertissement),
+# seuls GPU_MINER, GPU_ARGS, CPU_MINER et CPU_ARGS comptent.
+present=()
+absent=()
+for name in GPU_MINER GPU_ARGS CPU_MINER CPU_ARGS; do
+  if [[ -n "${!name:-}" ]]; then present+=("$name"); else absent+=("$name"); fi
+done
+log "Variables recues : ${present[*]:-aucune}${absent[*]:+ ; absentes : ${absent[*]}}"
 old_vars=()
 for name in MINER COIN ALGO POOL WALLET WORKER PASS EXTRA_ARGS \
             CPU_POOL CPU_WALLET CPU_WORKER CPU_THREADS CPU_ALGO CPU_COIN CPU_EXTRA_ARGS; do
   [[ -n "${!name:-}" ]] && old_vars+=("$name")
 done
 if [[ ${#old_vars[@]} -gt 0 ]]; then
-  die "variables d'une ancienne version detectees : ${old_vars[*]}. Cette version utilise GPU_MINER, GPU_ARGS, CPU_MINER et CPU_ARGS (voir le README)."
+  log "ATTENTION : variables d'une ancienne version ignorees : ${old_vars[*]} (cette version n'utilise que GPU_MINER, GPU_ARGS, CPU_MINER et CPU_ARGS)."
 fi
 
 # --- Outils ----------------------------------------------------------------------
