@@ -1,0 +1,19 @@
+Templates vast.ai pour clusmi/rentingminers (nouvelle version)
+===============================================================
+Launch mode : Docker ENTRYPOINT  ·  champ des arguments : vide.
+Remplace les ADRESSE_... par tes wallets. Les valeurs avec des espaces restent entre guillemets.
+
+--- Pearl (GPU) + Monero (CPU, XMRig) : équivalent de ton template actuel ---
+
+-e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE_PEARL --worker FARM" -e CPU_MINER=xmrig -e CPU_ARGS="--coin monero -o xmr.kryptex.network:7029 -u ADRESSE_MONERO/RENT -t 184 -k"
+
+--- Pearl (GPU) + DragonX (CPU, SRBMiner) ---
+
+-e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE_PEARL --worker FARM" -e CPU_MINER=srbminer -e CPU_ARGS="--algorithm randomdrgx --pool POOL_DRAGONX:PORT --wallet ADRESSE_DRAGONX.RENT --cpu-threads 180"
+
+--- Pearl seul (pas de minage CPU) ---
+
+-e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE_PEARL --worker FARM"
+
+Pour vérifier un template sans miner : ajoute -e DRY_RUN=1, les deux commandes complètes
+s'affichent dans les logs, puis enlève-le.

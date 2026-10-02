@@ -1,6 +1,6 @@
 # Image de minage pour GPU loues (vast.ai, Clore.ai...) :
-#   - GPU NVIDIA : SRBMiner-MULTI ou BzMiner (variable MINER)
-#   - CPU        : XMRig (Monero), optionnel (variables CPU_*)
+#   - GPU NVIDIA : SRBMiner-MULTI (GPU_ARGS)
+#   - CPU        : XMRig ou SRBMiner-MULTI, optionnel (CPU_MINER, CPU_ARGS)
 #
 # Les versions, URL et empreintes sont fournies par le workflow GitHub
 # (scripts/resolve-versions.sh). Chaque archive est telechargee depuis la page
@@ -19,9 +19,6 @@ RUN apt-get update \
 ARG SRB_VERSION
 ARG SRB_URL
 ARG SRB_SHA256
-ARG BZ_VERSION
-ARG BZ_URL
-ARG BZ_SHA256
 ARG XMRIG_VERSION
 ARG XMRIG_URL
 ARG XMRIG_SHA256
@@ -30,7 +27,6 @@ COPY scripts/fetch-miner.sh /usr/local/bin/fetch-miner
 RUN chmod +x /usr/local/bin/fetch-miner \
     && mkdir -p /opt/miners \
     && fetch-miner srbminer "$SRB_VERSION"   "$SRB_URL"   "$SRB_SHA256"   SRBMiner-MULTI \
-    && fetch-miner bzminer  "$BZ_VERSION"    "$BZ_URL"    "$BZ_SHA256"    bzminer \
     && fetch-miner xmrig    "$XMRIG_VERSION" "$XMRIG_URL" "$XMRIG_SHA256" xmrig
 
 # ---------------------------------------------------------------------------
@@ -40,7 +36,7 @@ FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 # ca-certificates : connexions TLS aux pools.
-# ocl-icd-libopencl1 : chargeur OpenCL, que certains mineurs ouvrent au demarrage.
+# ocl-icd-libopencl1 : chargeur OpenCL, que SRBMiner ouvre au demarrage.
 # wget : demande par SRBMiner (il s'arrete sans lui si sa connexion directe a
 # ses serveurs de frais echoue).
 # Le pilote NVIDIA (libcuda, NVML) n'est PAS dans l'image : l'hote l'injecte
@@ -56,12 +52,12 @@ RUN chmod 0755 /usr/local/bin/entrypoint.sh \
 
 ENV NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    MINER=srbminer \
-    COIN=pearl \
+    GPU_MINER=srbminer \
+    CPU_MINER=xmrig \
     RESTART_DELAY=10
 
 LABEL org.opencontainers.image.title="rentingminers" \
-      org.opencontainers.image.description="SRBMiner-MULTI et BzMiner (GPU NVIDIA) + XMRig (CPU, optionnel), reglage par variables d'environnement"
+      org.opencontainers.image.description="SRBMiner-MULTI (GPU NVIDIA) + XMRig ou SRBMiner-MULTI (CPU, optionnel) ; arguments des mineurs dans GPU_ARGS et CPU_ARGS"
 
 WORKDIR /opt/miners/work
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

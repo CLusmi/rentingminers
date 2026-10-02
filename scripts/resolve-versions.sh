@@ -12,7 +12,6 @@ set -euo pipefail
 # cle | depot GitHub officiel | nom de l'archive Linux (regex)
 MINERS=(
   "SRB|doktor83/SRBMiner-Multi|^SRBMiner-Multi-.*-Linux\\.tar\\.gz$"
-  "BZ|bzminer/bzminer|^bzminer_.*_linux\\.tar\\.gz$"
   "XMRIG|xmrig/xmrig|^xmrig-[0-9.]+-linux-static-x64\\.tar\\.gz$"
 )
 
