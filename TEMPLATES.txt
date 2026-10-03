@@ -38,11 +38,11 @@ les replicas ; la pool affiche leur hashrate cumulé.
 
 --- Première mise en service : mode observe (surveille, écrit ses verdicts, n'agit pas) ---
 
-docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE_PEARL --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=300T,4090=250T,3090=100T -e SALAD_MAX_RESTARTS=5 clusmi/rentingminers:latest
+docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE_PEARL --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=300T,4090=250T,3090=100T -e SALAD_MAX_RESTARTS=5 clusmi/rentingminers:AAAA-MM-JJ-HHMM
 
 --- Ensuite : mode reallocate (demande à Salad une autre machine quand une règle se déclenche) ---
 
-docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE_PEARL --worker SALAD" -e SALAD_WATCHDOG=reallocate -e SALAD_MIN_HASHRATE=5090=300T,4090=250T,3090=100T -e SALAD_MAX_RESTARTS=5 clusmi/rentingminers:latest
+docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE_PEARL --worker SALAD" -e SALAD_WATCHDOG=reallocate -e SALAD_MIN_HASHRATE=5090=300T,4090=250T,3090=100T -e SALAD_MAX_RESTARTS=5 clusmi/rentingminers:AAAA-MM-JJ-HHMM
 
 Règles du chien de garde (actif seulement sur Salad, jamais sur vast.ai) :
 - après 5 min de répit (SALAD_GRACE=300) suivant chaque démarrage du mineur GPU, 3 lectures
@@ -53,4 +53,7 @@ Règles du chien de garde (actif seulement sur Salad, jamais sur vast.ai) :
 - SALAD_MAX_RESTARTS=5 : verdict si le mineur GPU redémarre 5 fois en 10 min (facultatif) ;
 - après un verdict, 10 min de pause avant une nouvelle décision.
 Les lignes du chien de garde commencent par [salad] dans les logs du conteneur.
-Changer ces variables dans Salad (Edit → Environment Variables) redéploie tous les replicas.
+AAAA-MM-JJ-HHMM = étiquette datée du build (résumé du workflow GitHub, ex. 2026-10-03-2145).
+Sur Salad, toujours l'étiquette datée, jamais latest : Salad garde l'image copiée à la création
+du groupe tant que l'étiquette ne change pas. Nouveau build = Edit → Image Source → nouvelle
+étiquette. Changer les variables ou l'étiquette redéploie tous les replicas.

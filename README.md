@@ -20,10 +20,21 @@ Le workflow GitHub (`.github/workflows/build.yml`) :
 2. télécharge l'archive Linux et **vérifie son empreinte SHA-256** (celle que GitHub a
    enregistrée quand l'auteur a publié le fichier) : si elle ne correspond pas, la
    construction échoue ;
-3. construit l'image et l'envoie sur Docker Hub en `clusmi/rentingminers:latest`.
+3. construit l'image et l'envoie sur Docker Hub sous **deux étiquettes** :
+   `clusmi/rentingminers:latest` et une étiquette datée, par exemple
+   `clusmi/rentingminers:2026-10-03-2145`.
 
-Les versions incluses s'affichent dans le résumé du workflow et au démarrage du conteneur.
-Pour récupérer de nouvelles versions des mineurs, relance simplement le workflow.
+Les versions incluses et l'étiquette datée s'affichent dans le résumé du workflow ; les
+versions aussi au démarrage du conteneur. Pour récupérer de nouvelles versions des mineurs,
+relance simplement le workflow.
+
+- **vast.ai** : garde `latest` ; après un build, `recycle` (menu 2 de Vast-Switch-Log)
+  re-télécharge l'image.
+- **SaladCloud** : Salad copie l'image dans son registre à la création du groupe et ne la
+  re-télécharge pas tant que l'étiquette ne change pas, même si `latest` a bougé. Mets donc
+  l'**étiquette datée** dans le groupe (Edit → Image Source) ; pour passer à un nouveau
+  build, remplace-la par la nouvelle : Salad télécharge la nouvelle image et redéploie
+  les replicas.
 
 ## Mise en place (une seule fois)
 
@@ -167,11 +178,12 @@ overclock** (sur Salad, impossible d'overclocker), par exemple pour pearlhash : 
 Exemple (Docker Run dans Salad) :
 
 ```
-docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool POOL:PORT --wallet ADRESSE_PEARL --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=300T,4090=250T,3090=100T -e SALAD_MAX_RESTARTS=5 clusmi/rentingminers:latest
+docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool POOL:PORT --wallet ADRESSE_PEARL --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=300T,4090=250T,3090=100T -e SALAD_MAX_RESTARTS=5 clusmi/rentingminers:AAAA-MM-JJ-HHMM
 ```
 
-Modifier ces variables dans Salad (Edit → Environment Variables) crée une nouvelle version
-du groupe et redéploie tous les replicas.
+`AAAA-MM-JJ-HHMM` est l'étiquette datée du build (résumé du workflow GitHub). Modifier ces
+variables ou l'étiquette dans Salad (Edit) crée une nouvelle version du groupe et redéploie
+tous les replicas.
 
 ## À savoir
 
