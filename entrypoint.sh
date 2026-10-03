@@ -15,6 +15,18 @@
 #   RESTART_DELAY  secondes avant relance d'un mineur qui s'arrete (defaut 10)
 #   DRY_RUN=1      affiche les commandes finales sans lancer les mineurs
 #
+# Chien de garde SaladCloud (actif seulement sur Salad, c'est-a-dire si Salad a
+# injecte SALAD_MACHINE_ID, et seulement si SALAD_WATCHDOG est renseigne) :
+#   SALAD_WATCHDOG      observe   : surveille et ecrit ses verdicts dans le log, sans agir
+#                       reallocate: demande a Salad de deplacer le conteneur sur une
+#                                   autre machine quand une regle se declenche
+#   SALAD_MIN_HASHRATE  seuils par modele de carte, ex. 5090=300T,4090=250T,3090=100T
+#                       (K, M, G, T = kilo/mega/giga/tera hash par seconde) ; une carte
+#                       dont le modele n'est pas dans la liste n'est pas surveillee
+#   SALAD_GRACE         secondes de repit apres chaque (re)demarrage du mineur GPU (defaut 300)
+#   SALAD_BAD_READINGS  lectures consecutives sous le seuil avant verdict (defaut 3)
+#   SALAD_MAX_RESTARTS  verdict si le mineur GPU redemarre au moins N fois en 10 min (defaut : inactif)
+#
 # Options ajoutees automatiquement, sauf si elles sont deja dans tes arguments :
 #   SRBMiner GPU : --disable-cpu --log-file
 #   SRBMiner CPU : --disable-gpu --disable-numa-binding --log-file (dans un dossier a part)
@@ -112,6 +124,88 @@ opt_value() {
 
 lower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 
+# --- Chien de garde Salad : outils ----------------------------------------------
+wlog() { echo "[salad] $*"; }
+
+# Retire les codes couleur et d'eventuels guillemets autour de la ligne.
+strip_ansi() { sed -e $'s/\e\\[[0-9;]*[A-Za-z]//g' -e 's/^"//' -e 's/"$//'; }
+
+# Convertit une valeur et son unite (K, M, G, T ou vide) en hash par seconde (entier).
+hs_value() {
+  awk -v v="$1" -v u="$2" 'BEGIN {
+    m = 1; u = toupper(u)
+    if (u == "K") m = 1e3; else if (u == "M") m = 1e6; else if (u == "G") m = 1e9; else if (u == "T") m = 1e12
+    printf "%.0f", v * m
+  }'
+}
+
+# Vrai si $1 < $2 (grands entiers).
+hs_less() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 0 < b + 0) }'; }
+
+# Lit un seuil ecrit « 300T », « 250 TH/s », « 100T » ; affiche la valeur en H/s.
+parse_threshold() {
+  local spec="$1"
+  if [[ "$spec" =~ ^([0-9]+(\.[0-9]+)?)[[:space:]]*([KkMmGgTt]?)([Hh](/[Ss])?)?$ ]]; then
+    hs_value "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}"
+    return 0
+  fi
+  return 1
+}
+
+# Derniere ligne de statistiques GPU de SRBMiner dans le log ($1), nettoyee.
+# Formats reconnus :  GPU0 RTX 5090: 342.10 TH/s [T:71C ...]   (ligne compacte)
+#                     #0 RTX 5090 342.10 TH/s 400.0W ...         (ligne du tableau)
+wd_last_reading() {
+  tail -n 300 "$1" 2>/dev/null | strip_ansi \
+    | grep -aE '(GPU[0-9]+[[:space:]]+[^:]+:|#[0-9]+[[:space:]]+[^[:space:]]).*[0-9][[:space:]]*[KkMmGgTt]?[Hh]/s' \
+    | tail -n 1
+}
+
+# Decoupe une ligne de statistiques en modele / valeur / unite (variables wd_model,
+# wd_value, wd_unit). Vrai si la ligne est comprise.
+wd_parse_reading() {
+  local line="$1"
+  if [[ "$line" =~ GPU[0-9]+[[:space:]]+([^:]+):[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*([KkMmGgTt]?)[Hh]/s ]] \
+     || [[ "$line" =~ \#[0-9]+[[:space:]]+(.+[^[:space:]])[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*([KkMmGgTt]?)[Hh]/s ]]; then
+    wd_model="${BASH_REMATCH[1]}"
+    wd_value="${BASH_REMATCH[2]}"
+    wd_unit="${BASH_REMATCH[4]}"
+    wd_model="${wd_model#"${wd_model%%[![:space:]]*}"}"
+    wd_model="${wd_model%"${wd_model##*[![:space:]]}"}"
+    return 0
+  fi
+  return 1
+}
+
+# Seuil (tel qu'ecrit par l'utilisateur) pour un modele de carte, premiere cle qui
+# apparait dans le nom du modele ; rien si le modele n'est pas dans la liste.
+wd_threshold_for() {
+  local model i
+  model=$(lower "$1")
+  for i in "${!wd_keys[@]}"; do
+    if [[ "$model" == *"${wd_keys[$i]}"* ]]; then
+      echo "${wd_specs[$i]}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Demande a Salad de deplacer ce conteneur (IMDS). Vrai si Salad a accepte (204).
+# La variable wd_http recoit la ligne de statut HTTP ou l'erreur.
+wd_request_reallocate() {
+  local reason body out rc
+  reason=$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | cut -c1-900)
+  body="{\"reason\":\"$reason\"}"
+  out=$(wget -q -S -O /dev/null --timeout=10 --tries=1 --method=POST \
+          --header='Metadata: true' --header='Content-Type: application/json' \
+          --body-data="$body" "${SALAD_IMDS_URL:-http://169.254.169.254}/v1/reallocate" 2>&1)
+  rc=$?
+  wd_http=$(printf '%s\n' "$out" | grep -m1 -oE 'HTTP/[0-9.]+ [0-9]{3}.*' | sed 's/[[:space:]]*$//')
+  [[ -z "$wd_http" ]] && wd_http="pas de reponse (code wget $rc)"
+  [[ $rc -eq 0 ]]
+}
+
 # --- Qu'est-ce qui doit tourner ? -----------------------------------------------
 # Un cote est actif seulement si son mineur ET ses arguments sont renseignes.
 # Une variable seule est refusee : rien ne demarre sans choix explicite.
@@ -200,6 +294,60 @@ else
   log "CPU : desactive (CPU_MINER et CPU_ARGS vides)."
 fi
 
+# --- Chien de garde Salad : configuration ---------------------------------------
+# Actif seulement sur SaladCloud (SALAD_MACHINE_ID injecte par Salad) et si
+# SALAD_WATCHDOG est renseigne. Ailleurs (vast.ai...), rien ne change.
+wd_on=0
+wd_mode=""
+wd_keys=()
+wd_specs=()
+wd_grace="${SALAD_GRACE:-300}"
+wd_bad_max="${SALAD_BAD_READINGS:-3}"
+wd_max_restarts="${SALAD_MAX_RESTARTS:-}"
+wd_restart_file="$PWD/.gpu-restarts"
+if [[ -n "${SALAD_WATCHDOG:-}" ]]; then
+  wd_mode=$(lower "$SALAD_WATCHDOG")
+  case "$wd_mode" in
+    observe|reallocate) ;;
+    *) die "SALAD_WATCHDOG=${SALAD_WATCHDOG} inconnu. Valeurs possibles : observe, reallocate." ;;
+  esac
+  if [[ -z "${SALAD_MACHINE_ID:-}" ]]; then
+    log "Chien de garde Salad : SALAD_WATCHDOG est renseigne mais ce conteneur ne tourne pas sur Salad (SALAD_MACHINE_ID absent) : ignore."
+  elif [[ $gpu_on -eq 0 ]]; then
+    log "Chien de garde Salad : pas de mineur GPU a surveiller : ignore."
+  else
+    if [[ -n "${SALAD_MIN_HASHRATE:-}" ]]; then
+      IFS=',; ' read -r -a wd_entries <<< "${SALAD_MIN_HASHRATE//[$'\t\n']/ }"
+      for entry in "${wd_entries[@]}"; do
+        [[ -z "$entry" ]] && continue
+        [[ "$entry" == *=* ]] || die "SALAD_MIN_HASHRATE : « $entry » n'est pas de la forme MODELE=SEUIL (ex. 5090=300T)."
+        key=$(lower "${entry%%=*}")
+        spec="${entry#*=}"
+        [[ -n "$key" ]] || die "SALAD_MIN_HASHRATE : modele vide dans « $entry »."
+        parse_threshold "$spec" >/dev/null || die "SALAD_MIN_HASHRATE : seuil « $spec » illisible dans « $entry » (ex. 300T, 250T, 100T)."
+        wd_keys+=("$key")
+        wd_specs+=("$spec")
+      done
+    fi
+    [[ "$wd_grace" =~ ^[0-9]+$ ]]   || die "SALAD_GRACE=${wd_grace} : nombre de secondes attendu."
+    [[ "$wd_bad_max" =~ ^[1-9][0-9]*$ ]] || die "SALAD_BAD_READINGS=${wd_bad_max} : nombre entier (1 ou plus) attendu."
+    [[ -z "$wd_max_restarts" || "$wd_max_restarts" =~ ^[1-9][0-9]*$ ]] || die "SALAD_MAX_RESTARTS=${wd_max_restarts} : nombre entier (1 ou plus) attendu."
+    if [[ ${#wd_keys[@]} -eq 0 && -z "$wd_max_restarts" ]]; then
+      die "SALAD_WATCHDOG=${wd_mode} mais ni SALAD_MIN_HASHRATE ni SALAD_MAX_RESTARTS : rien a surveiller."
+    fi
+    wd_on=1
+    wd_desc="mode $wd_mode"
+    if [[ ${#wd_keys[@]} -gt 0 ]]; then
+      wd_desc+=" ; seuils : ${SALAD_MIN_HASHRATE} ($wd_bad_max lectures consecutives sous le seuil, repit ${wd_grace}s apres chaque demarrage du mineur GPU)"
+    fi
+    [[ -n "$wd_max_restarts" ]] && wd_desc+=" ; verdict si le mineur GPU redemarre $wd_max_restarts fois en 10 min"
+    log "Chien de garde Salad : $wd_desc."
+    [[ "$wd_mode" == observe ]] && log "Chien de garde Salad : mode observe, les verdicts sont seulement ecrits dans le log (SALAD_WATCHDOG=reallocate pour agir)."
+  fi
+elif [[ -n "${SALAD_MACHINE_ID:-}" ]]; then
+  log "Chien de garde Salad : desactive (SALAD_WATCHDOG vide)."
+fi
+
 if [[ "${DRY_RUN:-0}" == 1 ]]; then
   exit 0
 fi
@@ -245,8 +393,113 @@ start_cpu() {
   cpu_pid=$!
 }
 
+# --- Chien de garde Salad : boucle ---------------------------------------------
+# Tourne en tache de fond. Toutes les 30 s, lit la derniere ligne de statistiques
+# du log SRBMiner GPU. Apres le repit (SALAD_GRACE) qui suit chaque demarrage du
+# mineur GPU, SALAD_BAD_READINGS lectures consecutives sous le seuil du modele
+# donnent un verdict ; de meme si le mineur GPU redemarre trop souvent. Verdict :
+# ligne dans le log (observe) ou demande de reallocation a Salad (reallocate).
+# Une lecture a 0 n'est pas comptee (pool injoignable plutot que carte en panne).
+wd_pid=0
+wd_verdict() {
+  local reason_fr="$1" reason_en="$2"
+  if [[ "$wd_mode" == observe ]]; then
+    wlog "VERDICT (mode observe, rien fait) : $reason_fr. En mode reallocate, la reallocation serait demandee a Salad."
+    return 0
+  fi
+  wlog "VERDICT : $reason_fr. Demande de reallocation a Salad..."
+  if wd_request_reallocate "rentingminers watchdog: $reason_en"; then
+    wlog "Reallocation acceptee par Salad ($wd_http) : ce conteneur va etre arrete et relance sur une autre machine."
+    return 0
+  fi
+  wlog "Demande de reallocation refusee ou sans reponse ($wd_http) ; nouvelle tentative au prochain verdict."
+  return 1
+}
+
+salad_watchdog() {
+  local started now since last_restart bad=0 last_line="" line thr thr_hs hr_hs
+  local unknown_model="" zero_streak=0 ok_logged=0 cooldown_until=0 restarts
+  # SALAD_WD_INTERVAL et SALAD_IMDS_URL ne servent qu'aux tests de l'image.
+  local interval="${SALAD_WD_INTERVAL:-30}"
+  started=$(date +%s)
+  while true; do
+    sleep "$interval"
+    now=$(date +%s)
+    [[ $now -lt $cooldown_until ]] && continue
+
+    since=$started
+    if [[ -s "$wd_restart_file" ]]; then
+      last_restart=$(tail -n 1 "$wd_restart_file")
+      [[ "$last_restart" =~ ^[0-9]+$ && $last_restart -gt $since ]] && since=$last_restart
+      if [[ -n "$wd_max_restarts" ]]; then
+        restarts=$(awk -v t=$((now - 600)) '$1 >= t' "$wd_restart_file" | wc -l)
+        if [[ $restarts -ge $wd_max_restarts ]]; then
+          if wd_verdict "le mineur GPU a redemarre $restarts fois en 10 min (seuil $wd_max_restarts)" \
+                        "GPU miner restarted $restarts times in 10 minutes (limit $wd_max_restarts)"; then
+            cooldown_until=$((now + 600))
+          else
+            cooldown_until=$((now + 120))
+          fi
+          : > "$wd_restart_file"
+          bad=0
+          continue
+        fi
+      fi
+    fi
+
+    [[ ${#wd_keys[@]} -eq 0 ]] && continue
+    [[ $((now - since)) -lt $wd_grace ]] && continue
+
+    line=$(wd_last_reading "$gpu_log")
+    [[ -z "$line" || "$line" == "$last_line" ]] && continue
+    last_line="$line"
+    wd_parse_reading "$line" || continue
+
+    thr=$(wd_threshold_for "$wd_model") || {
+      if [[ "$unknown_model" != "$wd_model" ]]; then
+        unknown_model="$wd_model"
+        wlog "Pas de seuil pour « $wd_model » dans SALAD_MIN_HASHRATE (${SALAD_MIN_HASHRATE}) : hashrate non surveille sur cette carte."
+      fi
+      continue
+    }
+    thr_hs=$(parse_threshold "$thr")
+    hr_hs=$(hs_value "$wd_value" "$wd_unit")
+
+    if [[ "$hr_hs" == 0 ]]; then
+      zero_streak=$((zero_streak + 1))
+      [[ $zero_streak -eq 1 ]] && wlog "Hashrate a 0 sur $wd_model : lecture ignoree (pool injoignable ?)."
+      continue
+    fi
+    zero_streak=0
+
+    if hs_less "$hr_hs" "$thr_hs"; then
+      bad=$((bad + 1))
+      wlog "Hashrate ${wd_value} ${wd_unit}H/s < seuil ${thr} ($wd_model) : ${bad}/${wd_bad_max}."
+      if [[ $bad -ge $wd_bad_max ]]; then
+        if wd_verdict "hashrate ${wd_value} ${wd_unit}H/s sous le seuil ${thr} ($wd_model) pendant ${bad} lectures" \
+                      "GPU hashrate ${wd_value} ${wd_unit}H/s below threshold ${thr} for ${wd_model} during ${bad} consecutive readings"; then
+          cooldown_until=$((now + 600))
+        else
+          cooldown_until=$((now + 120))
+        fi
+        bad=0
+      fi
+    elif [[ $bad -gt 0 ]]; then
+      wlog "Hashrate revenu a ${wd_value} ${wd_unit}H/s (seuil ${thr}, $wd_model) : compteur remis a zero."
+      bad=0
+      ok_logged=$now
+    elif [[ "$wd_mode" == observe || $((now - ok_logged)) -ge 600 ]]; then
+      # En mode observe chaque lecture est ecrite ; en mode reallocate, une ligne
+      # de controle toutes les 10 min suffit.
+      wlog "Hashrate ${wd_value} ${wd_unit}H/s >= seuil ${thr} ($wd_model) : OK."
+      ok_logged=$now
+    fi
+  done
+}
+
 stop() {
   log "Arret demande, fermeture des mineurs..."
+  [[ $wd_pid -ne 0 ]] && kill "$wd_pid" 2>/dev/null
   for pid in "$gpu_pid" "$cpu_pid"; do
     [[ $pid -ne 0 ]] && kill -TERM "$pid" 2>/dev/null
   done
@@ -262,6 +515,11 @@ trap stop TERM INT
 
 [[ $gpu_on -eq 1 ]] && start_gpu
 [[ $cpu_on -eq 1 ]] && start_cpu
+if [[ $wd_on -eq 1 ]]; then
+  : > "$wd_restart_file"
+  salad_watchdog &
+  wd_pid=$!
+fi
 
 # Surveillance toutes les 2 s : un mineur arrete est relance apres le delai,
 # sans bloquer l'autre, qui continue de miner.
@@ -280,6 +538,8 @@ while true; do
     if [[ $gpu_restart_at -ne 0 && $now -ge $gpu_restart_at ]]; then
       start_gpu
       gpu_restart_at=0
+      # Le chien de garde Salad s'en sert : repit apres redemarrage, compte des redemarrages.
+      [[ $wd_on -eq 1 ]] && echo "$now" >> "$wd_restart_file"
     fi
   fi
 

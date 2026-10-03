@@ -28,3 +28,29 @@ pas de minage CPU.
 
 Pour vérifier un template sans miner : ajoute -e DRY_RUN=1, les deux commandes complètes
 s'affichent dans les logs, puis enlève-le.
+
+
+SaladCloud (Pearl seul, GPU) avec chien de garde
+================================================
+Container group → Docker Run (ou Environment Variables, une case par variable, valeurs
+SANS guillemets). Sur Salad, une machine = une carte, donc le worker est le même sur tous
+les replicas ; la pool affiche leur hashrate cumulé.
+
+--- Première mise en service : mode observe (surveille, écrit ses verdicts, n'agit pas) ---
+
+docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE_PEARL --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=300T,4090=250T,3090=100T -e SALAD_MAX_RESTARTS=5 clusmi/rentingminers:latest
+
+--- Ensuite : mode reallocate (demande à Salad une autre machine quand une règle se déclenche) ---
+
+docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE_PEARL --worker SALAD" -e SALAD_WATCHDOG=reallocate -e SALAD_MIN_HASHRATE=5090=300T,4090=250T,3090=100T -e SALAD_MAX_RESTARTS=5 clusmi/rentingminers:latest
+
+Règles du chien de garde (actif seulement sur Salad, jamais sur vast.ai) :
+- après 5 min de répit (SALAD_GRACE=300) suivant chaque démarrage du mineur GPU, 3 lectures
+  consécutives sous le seuil de la carte (SALAD_BAD_READINGS=3) donnent un verdict ;
+- une carte dont le modèle n'est pas dans SALAD_MIN_HASHRATE n'est pas surveillée (ligne
+  « Pas de seuil pour ... » dans les logs) ; la clé 3090 couvre aussi la 3090 Ti ;
+- une lecture à 0 n'est pas comptée (pool injoignable plutôt que carte en panne) ;
+- SALAD_MAX_RESTARTS=5 : verdict si le mineur GPU redémarre 5 fois en 10 min (facultatif) ;
+- après un verdict, 10 min de pause avant une nouvelle décision.
+Les lignes du chien de garde commencent par [salad] dans les logs du conteneur.
+Changer ces variables dans Salad (Edit → Environment Variables) redéploie tous les replicas.

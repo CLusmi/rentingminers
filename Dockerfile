@@ -2,6 +2,8 @@
 #   - GPU NVIDIA : SRBMiner-MULTI (GPU_MINER, GPU_ARGS)
 #   - CPU        : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)
 # Un cote ne demarre que si son mineur ET ses arguments sont renseignes.
+# Sur SaladCloud, un chien de garde facultatif (SALAD_WATCHDOG) demande une
+# autre machine quand la carte est trop lente (voir entrypoint.sh).
 #
 # Les versions, URL et empreintes sont fournies par le workflow GitHub
 # (scripts/resolve-versions.sh). Chaque archive est telechargee depuis la page

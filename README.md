@@ -1,12 +1,14 @@
 # rentingminers
 
-Image Docker pour miner sur des machines louées (vast.ai, Clore.ai…) :
+Image Docker pour miner sur des machines louées (vast.ai, SaladCloud, Clore.ai…) :
 
 - **GPU NVIDIA** : SRBMiner-MULTI ;
 - **CPU** : XMRig ou SRBMiner-MULTI.
 
 GPU seul, CPU seul ou les deux : **rien ne démarre sans choix explicite**. Les arguments
-des mineurs sont donnés **tels quels**, dans leur syntaxe d'origine.
+des mineurs sont donnés **tels quels**, dans leur syntaxe d'origine. Sur SaladCloud, un
+chien de garde facultatif peut demander une autre machine quand la carte est trop lente
+(voir plus bas).
 Image publiée : `clusmi/rentingminers:latest` (publique).
 
 ## Comment l'image est construite
@@ -42,6 +44,7 @@ Pour récupérer de nouvelles versions des mineurs, relance simplement le workfl
 | `CPU_ARGS` | | arguments du mineur CPU, tels quels |
 | `RESTART_DELAY` | `10` | secondes avant relance d'un mineur qui s'arrête |
 | `DRY_RUN` | | `1` : affiche les commandes finales sans miner |
+| `SALAD_WATCHDOG`, `SALAD_MIN_HASHRATE`, … | | chien de garde SaladCloud, voir [plus bas](#saladcloud--chien-de-garde) |
 
 Aucun mineur n'est prérempli. Un côté démarre seulement si **son mineur et ses arguments**
 sont renseignés tous les deux :
@@ -133,6 +136,43 @@ Quelques algorithmes CPU de SRBMiner (liste complète sur sa page GitHub) : `ran
   si son conteneur est recréé (`recycle`, ou le menu 2 de Vast-Switch-Log) ; un simple
   `reboot` garde l'ancienne.
 
+## SaladCloud : chien de garde
+
+Sur Salad, chaque replica tourne sur le PC d'un particulier, avec une carte parfois bridée
+ou utilisée en même temps. Le chien de garde lit le hashrate dans le log SRBMiner et, si la
+carte est trop lente, demande à Salad de déplacer le conteneur sur une autre machine (via
+le service de métadonnées de Salad, `169.254.169.254/v1/reallocate`). Il n'est actif que
+sur Salad (variable `SALAD_MACHINE_ID` injectée par Salad) **et** si `SALAD_WATCHDOG` est
+renseigné : sur vast.ai, rien ne change.
+
+| Variable | Exemple | Rôle |
+|---|---|---|
+| `SALAD_WATCHDOG` | `observe` ou `reallocate` | `observe` : surveille et écrit ses verdicts dans le log sans agir ; `reallocate` : demande la réallocation |
+| `SALAD_MIN_HASHRATE` | `5090=300T,4090=250T,3090=100T` | seuil par modèle de carte (K, M, G, T = kilo/méga/giga/téra H/s) ; la première clé contenue dans le nom du modèle s'applique (`3090` couvre aussi la 3090 Ti) ; un modèle absent n'est pas surveillé |
+| `SALAD_GRACE` | `300` | secondes de répit après chaque (re)démarrage du mineur GPU |
+| `SALAD_BAD_READINGS` | `3` | lectures consécutives sous le seuil avant verdict |
+| `SALAD_MAX_RESTARTS` | `5` | verdict si le mineur GPU redémarre au moins N fois en 10 min (inactif si absent) |
+
+Déroulement : après le répit, une lecture toutes les 30 s (SRBMiner publie ses statistiques
+toutes les 30 à 90 s, seules les nouvelles comptent) ; `SALAD_BAD_READINGS` lectures
+consécutives sous le seuil donnent un verdict, une lecture au-dessus remet le compteur à
+zéro, une lecture à 0 n'est pas comptée (pool injoignable). Après un verdict, 10 min de
+pause. Les lignes du chien de garde commencent par `[salad]`.
+
+Conseil : première mise en service en `observe`, lecture des logs pendant une heure,
+puis `reallocate`. Les seuils se placent vers 85 % du hashrate d'une carte saine **sans
+overclock** (sur Salad, impossible d'overclocker), par exemple pour pearlhash : RTX 5090
+≈ 340 TH/s → `300T`, RTX 4090 ≈ 290 TH/s → `250T`, RTX 3090 ≈ 130 TH/s → `100T`.
+
+Exemple (Docker Run dans Salad) :
+
+```
+docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool POOL:PORT --wallet ADRESSE_PEARL --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=300T,4090=250T,3090=100T -e SALAD_MAX_RESTARTS=5 clusmi/rentingminers:latest
+```
+
+Modifier ces variables dans Salad (Edit → Environment Variables) crée une nouvelle version
+du groupe et redéploie tous les replicas.
+
 ## À savoir
 
 - **Frais** : chaque mineur prélève des frais de développeur fixés par son auteur
@@ -166,3 +206,10 @@ Quelques algorithmes CPU de SRBMiner (liste complète sur sa page GitHub) : `ran
   les arguments, elle les transmet.
 - **`No such container` sur vast.ai** : l'image n'a pas pu être téléchargée ; vérifie que
   le dépôt Docker Hub est public.
+- **`SALAD_WATCHDOG est renseigne mais ce conteneur ne tourne pas sur Salad`** : la variable
+  est dans un template vast.ai ; sans effet, à retirer.
+- **`Pas de seuil pour « ... »`** : la carte attribuée par Salad n'est pas dans
+  `SALAD_MIN_HASHRATE` ; elle mine normalement, sans surveillance du hashrate.
+- **`Demande de reallocation refusee ou sans reponse`** : le service de métadonnées de Salad
+  n'a pas accepté la demande ; le chien de garde réessaie au prochain verdict. Si ça
+  persiste, réalloue l'instance à la main (menu ⋮ → Reallocate).
