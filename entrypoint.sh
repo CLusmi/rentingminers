@@ -26,6 +26,9 @@
 #   SALAD_GRACE         secondes de repit apres chaque (re)demarrage du mineur GPU (defaut 300)
 #   SALAD_BAD_READINGS  lectures consecutives sous le seuil avant verdict (defaut 3)
 #   SALAD_MAX_RESTARTS  verdict si le mineur GPU redemarre au moins N fois en 10 min (defaut : inactif)
+#   SALAD_ZERO_READINGS verdict apres N lectures consecutives a 0 H/s (defaut 2 ; 0 = inactif)
+#   SALAD_STALE_MINUTES verdict apres N minutes sans nouvelle statistique du mineur GPU
+#                       (defaut 2, ou deux fois l'intervalle entre deux statistiques si plus long ; 0 = inactif)
 #
 # Options ajoutees automatiquement, sauf si elles sont deja dans tes arguments :
 #   SRBMiner GPU : --disable-cpu --log-file
@@ -304,6 +307,10 @@ wd_specs=()
 wd_grace="${SALAD_GRACE:-300}"
 wd_bad_max="${SALAD_BAD_READINGS:-3}"
 wd_max_restarts="${SALAD_MAX_RESTARTS:-}"
+# Hashrate a 0 : verdict apres N lectures consecutives a 0 (0 = regle desactivee).
+wd_zero_max="${SALAD_ZERO_READINGS:-2}"
+# Plus aucune statistique : verdict apres N minutes sans nouvelle lecture (0 = desactivee).
+wd_stale_min="${SALAD_STALE_MINUTES:-2}"
 wd_restart_file="$PWD/.gpu-restarts"
 if [[ -n "${SALAD_WATCHDOG:-}" ]]; then
   wd_mode=$(lower "$SALAD_WATCHDOG")
@@ -332,8 +339,10 @@ if [[ -n "${SALAD_WATCHDOG:-}" ]]; then
     [[ "$wd_grace" =~ ^[0-9]+$ ]]   || die "SALAD_GRACE=${wd_grace} : nombre de secondes attendu."
     [[ "$wd_bad_max" =~ ^[1-9][0-9]*$ ]] || die "SALAD_BAD_READINGS=${wd_bad_max} : nombre entier (1 ou plus) attendu."
     [[ -z "$wd_max_restarts" || "$wd_max_restarts" =~ ^[1-9][0-9]*$ ]] || die "SALAD_MAX_RESTARTS=${wd_max_restarts} : nombre entier (1 ou plus) attendu."
-    if [[ ${#wd_keys[@]} -eq 0 && -z "$wd_max_restarts" ]]; then
-      die "SALAD_WATCHDOG=${wd_mode} mais ni SALAD_MIN_HASHRATE ni SALAD_MAX_RESTARTS : rien a surveiller."
+    [[ "$wd_zero_max" =~ ^[0-9]+$ ]]  || die "SALAD_ZERO_READINGS=${wd_zero_max} : nombre entier attendu (0 = desactive)."
+    [[ "$wd_stale_min" =~ ^[0-9]+$ ]] || die "SALAD_STALE_MINUTES=${wd_stale_min} : nombre de minutes attendu (0 = desactive)."
+    if [[ ${#wd_keys[@]} -eq 0 && -z "$wd_max_restarts" && $wd_zero_max -eq 0 && $wd_stale_min -eq 0 ]]; then
+      die "SALAD_WATCHDOG=${wd_mode} mais aucune regle active (SALAD_MIN_HASHRATE, SALAD_MAX_RESTARTS, SALAD_ZERO_READINGS, SALAD_STALE_MINUTES) : rien a surveiller."
     fi
     wd_on=1
     wd_desc="mode $wd_mode"
@@ -341,6 +350,8 @@ if [[ -n "${SALAD_WATCHDOG:-}" ]]; then
       wd_desc+=" ; seuils : ${SALAD_MIN_HASHRATE} ($wd_bad_max lectures consecutives sous le seuil, repit ${wd_grace}s apres chaque demarrage du mineur GPU)"
     fi
     [[ -n "$wd_max_restarts" ]] && wd_desc+=" ; verdict si le mineur GPU redemarre $wd_max_restarts fois en 10 min"
+    [[ $wd_zero_max -gt 0 ]] && wd_desc+=" ; verdict apres $wd_zero_max lectures a 0"
+    [[ $wd_stale_min -gt 0 ]] && wd_desc+=" ; verdict sans statistiques pendant $wd_stale_min min"
     log "Chien de garde Salad : $wd_desc."
     [[ "$wd_mode" == observe ]] && log "Chien de garde Salad : mode observe, les verdicts sont seulement ecrits dans le log (SALAD_WATCHDOG=reallocate pour agir)."
   fi
@@ -419,6 +430,7 @@ wd_verdict() {
 salad_watchdog() {
   local started now since last_restart bad=0 last_line="" line thr thr_hs hr_hs
   local unknown_model="" zero_streak=0 ok_logged=0 cooldown_until=0 restarts
+  local since_seen="" fresh last_reading_at=0 prev_reading_at=0 ref limit gap
   # SALAD_WD_INTERVAL et SALAD_IMDS_URL ne servent qu'aux tests de l'image.
   local interval="${SALAD_WD_INTERVAL:-30}"
   started=$(date +%s)
@@ -447,14 +459,71 @@ salad_watchdog() {
       fi
     fi
 
-    [[ ${#wd_keys[@]} -eq 0 ]] && continue
     [[ $((now - since)) -lt $wd_grace ]] && continue
 
-    line=$(wd_last_reading "$gpu_log")
-    [[ -z "$line" || "$line" == "$last_line" ]] && continue
-    last_line="$line"
-    wd_parse_reading "$line" || continue
+    # Nouveau demarrage du mineur GPU : les compteurs repartent de zero.
+    if [[ "$since" != "$since_seen" ]]; then
+      since_seen=$since; last_line=""; last_reading_at=0; prev_reading_at=0; zero_streak=0; bad=0
+    fi
 
+    line=$(wd_last_reading "$gpu_log")
+    fresh=0
+    if [[ -n "$line" && "$line" != "$last_line" ]]; then
+      last_line="$line"
+      fresh=1
+      prev_reading_at=$last_reading_at
+      last_reading_at=$now
+    fi
+
+    # Plus aucune statistique : SALAD_STALE_MINUTES, ou deux fois l'intervalle habituel
+    # entre deux statistiques si c'est plus long (pour ne pas juger entre deux lignes).
+    if [[ $wd_stale_min -gt 0 && $fresh -eq 0 ]]; then
+      ref=$last_reading_at
+      [[ $ref -eq 0 ]] && ref=$((since + wd_grace))
+      limit=$((wd_stale_min * 60))
+      if [[ $prev_reading_at -gt 0 ]]; then
+        gap=$((last_reading_at - prev_reading_at))
+        [[ $((2 * gap + 15)) -gt $limit ]] && limit=$((2 * gap + 15))
+      fi
+      if [[ $((now - ref)) -ge $limit ]]; then
+        if wd_verdict "plus aucune statistique du mineur GPU depuis $(((now - ref) / 60)) min (limite $((limit / 60)) min)" \
+                      "no GPU miner statistics for $(((now - ref) / 60)) minutes (limit $((limit / 60)) minutes)"; then
+          cooldown_until=$((now + 600))
+        else
+          cooldown_until=$((now + 120))
+        fi
+        last_reading_at=$now; prev_reading_at=0
+        continue
+      fi
+    fi
+    [[ $fresh -eq 0 ]] && continue
+
+    wd_parse_reading "$line" || continue
+    hr_hs=$(hs_value "$wd_value" "$wd_unit")
+
+    # Hashrate a 0 : SALAD_ZERO_READINGS lectures consecutives.
+    if [[ "$hr_hs" == 0 ]]; then
+      zero_streak=$((zero_streak + 1))
+      if [[ $wd_zero_max -gt 0 ]]; then
+        wlog "Hashrate a 0 sur $wd_model : ${zero_streak}/${wd_zero_max}."
+        if [[ $zero_streak -ge $wd_zero_max ]]; then
+          if wd_verdict "hashrate a 0 sur $wd_model pendant ${zero_streak} lectures" \
+                        "GPU hashrate at 0 on ${wd_model} during ${zero_streak} consecutive readings"; then
+            cooldown_until=$((now + 600))
+          else
+            cooldown_until=$((now + 120))
+          fi
+          zero_streak=0
+        fi
+      else
+        [[ $zero_streak -eq 1 ]] && wlog "Hashrate a 0 sur $wd_model : lecture ignoree (SALAD_ZERO_READINGS=0)."
+      fi
+      continue
+    fi
+    [[ $zero_streak -gt 0 ]] && wlog "Hashrate revenu a ${wd_value} ${wd_unit}H/s apres ${zero_streak} lecture(s) a 0."
+    zero_streak=0
+
+    [[ ${#wd_keys[@]} -eq 0 ]] && continue
     thr=$(wd_threshold_for "$wd_model") || {
       if [[ "$unknown_model" != "$wd_model" ]]; then
         unknown_model="$wd_model"
@@ -463,14 +532,6 @@ salad_watchdog() {
       continue
     }
     thr_hs=$(parse_threshold "$thr")
-    hr_hs=$(hs_value "$wd_value" "$wd_unit")
-
-    if [[ "$hr_hs" == 0 ]]; then
-      zero_streak=$((zero_streak + 1))
-      [[ $zero_streak -eq 1 ]] && wlog "Hashrate a 0 sur $wd_model : lecture ignoree (pool injoignable ?)."
-      continue
-    fi
-    zero_streak=0
 
     if hs_less "$hr_hs" "$thr_hs"; then
       bad=$((bad + 1))

@@ -163,11 +163,15 @@ renseigné : sur vast.ai, rien ne change.
 | `SALAD_GRACE` | `300` | secondes de répit après chaque (re)démarrage du mineur GPU |
 | `SALAD_BAD_READINGS` | `3` | lectures consécutives sous le seuil avant verdict |
 | `SALAD_MAX_RESTARTS` | `5` | verdict si le mineur GPU redémarre au moins N fois en 10 min (inactif si absent) |
+| `SALAD_ZERO_READINGS` | `2` | verdict après N lectures consécutives à 0 H/s (2 par défaut ; `0` = règle désactivée) |
+| `SALAD_STALE_MINUTES` | `2` | verdict après N minutes sans nouvelle statistique du mineur GPU (2 par défaut ; `0` = désactivée). Si SRBMiner publie ses statistiques moins souvent, la limite devient deux fois cet intervalle, pour ne pas juger entre deux lignes |
 
 Déroulement : après le répit, une lecture toutes les 30 s (SRBMiner publie ses statistiques
 toutes les 30 à 90 s, seules les nouvelles comptent) ; `SALAD_BAD_READINGS` lectures
 consécutives sous le seuil donnent un verdict, une lecture au-dessus remet le compteur à
-zéro, une lecture à 0 n'est pas comptée (pool injoignable). Après un verdict, 10 min de
+zéro. Une lecture à 0 ne compte pas pour le seuil mais pour `SALAD_ZERO_READINGS` : deux
+lectures à 0 de suite et la machine est jugée en panne. Plus aucune ligne de statistiques
+pendant `SALAD_STALE_MINUTES` (mineur figé) : verdict aussi. Après un verdict, 10 min de
 pause. Les lignes du chien de garde commencent par `[salad]`.
 
 Conseil : première mise en service en `observe`, lecture des logs pendant une heure,

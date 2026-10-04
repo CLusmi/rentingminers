@@ -49,8 +49,9 @@ Règles du chien de garde (actif seulement sur Salad, jamais sur vast.ai) :
   consécutives sous le seuil de la carte (SALAD_BAD_READINGS=3) donnent un verdict ;
 - une carte dont le modèle n'est pas dans SALAD_MIN_HASHRATE n'est pas surveillée (ligne
   « Pas de seuil pour ... » dans les logs) ; la clé 3090 couvre aussi la 3090 Ti ;
-- une lecture à 0 n'est pas comptée (pool injoignable plutôt que carte en panne) ;
 - SALAD_MAX_RESTARTS=5 : verdict si le mineur GPU redémarre 5 fois en 10 min (facultatif) ;
+- deux lectures à 0 H/s de suite (SALAD_ZERO_READINGS=2, 0 = désactivé) : verdict ;
+- plus aucune statistique pendant 2 min (SALAD_STALE_MINUTES=2, 0 = désactivé) : verdict ;
 - après un verdict, 10 min de pause avant une nouvelle décision.
 Les lignes du chien de garde commencent par [salad] dans les logs du conteneur.
 AAAA-MM-JJ-HHMM = étiquette datée du build (résumé du workflow GitHub, ex. 2026-10-03-2145).
