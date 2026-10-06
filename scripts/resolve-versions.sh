@@ -9,10 +9,15 @@
 # Necessite : gh (CLI GitHub, authentifie via GH_TOKEN) et jq.
 set -euo pipefail
 
-# cle | depot GitHub officiel | nom de l'archive Linux (regex)
+# cle | depot GitHub officiel | nom du fichier Linux (regex) : archive .tar.gz, ou
+# binaire nu (PeakMiner et RGminer publient le binaire Linux tel quel).
 MINERS=(
   "SRB|doktor83/SRBMiner-Multi|^SRBMiner-Multi-.*-Linux\\.tar\\.gz$"
   "XMRIG|xmrig/xmrig|^xmrig-[0-9.]+-linux-static-x64\\.tar\\.gz$"
+  "FORGE|0xHashRaptor/ForgeMiner|^ForgeMiner-[0-9.]+-linux\\.tar\\.gz$"
+  "KRIG|kryptex/krig-miner|^krig-miner-[0-9.]+-linux-x64\\.tar\\.gz$"
+  "PEAK|peakminer/peakminer|^peakminer-[0-9.]+-linux-x86_64$"
+  "RG|Printscan/rgminer|^rgminer-[0-9.]+$"
 )
 
 for entry in "${MINERS[@]}"; do
@@ -25,7 +30,7 @@ for entry in "${MINERS[@]}"; do
   matches=$(jq -c --arg re "$pattern" '[.assets[] | select(.name | test($re))]' <<< "$json")
   count=$(jq 'length' <<< "$matches")
   if [[ "$count" -ne 1 ]]; then
-    echo "ERREUR: ${repo} ${tag} : ${count} archive(s) Linux trouvee(s) au lieu d'une seule." >&2
+    echo "ERREUR: ${repo} ${tag} : ${count} fichier(s) Linux trouve(s) au lieu d'un seul (motif : ${pattern})." >&2
     jq -r '.assets[].name' <<< "$json" >&2
     exit 1
   fi
