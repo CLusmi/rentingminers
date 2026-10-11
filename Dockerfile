@@ -1,13 +1,16 @@
-# Image de minage pour GPU loues (vast.ai, Clore.ai...) :
-#   - GPU NVIDIA : SRBMiner-MULTI (GPU_MINER, GPU_ARGS)
+# Image de minage pour GPU loues (vast.ai, SaladCloud, Clore.ai...) :
+#   - GPU NVIDIA : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner ou lpminer
+#                  (GPU_MINER, GPU_ARGS)
 #   - CPU        : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)
 # Un cote ne demarre que si son mineur ET ses arguments sont renseignes.
-# Sur SaladCloud, un chien de garde facultatif (SALAD_WATCHDOG) demande une
-# autre machine quand la carte est trop lente (voir entrypoint.sh).
+# Sur SaladCloud, un chien de garde facultatif (SALAD_WATCHDOG, SRBMiner
+# seulement) demande une autre machine quand la carte est trop lente (voir
+# entrypoint.sh).
 #
 # Les versions, URL et empreintes sont fournies par le workflow GitHub
-# (scripts/resolve-versions.sh). Chaque archive est telechargee depuis la page
-# GitHub officielle du mineur et verifiee avant installation.
+# (scripts/resolve-versions.sh). Chaque fichier est telecharge depuis la page
+# GitHub officielle du mineur (lpminer : eu.lproute.com, version et empreinte
+# figees) et verifie avant installation.
 
 # ---------------------------------------------------------------------------
 # Etape 1 : telechargement et verification des mineurs
@@ -25,12 +28,29 @@ ARG SRB_SHA256
 ARG XMRIG_VERSION
 ARG XMRIG_URL
 ARG XMRIG_SHA256
+ARG FORGE_VERSION
+ARG FORGE_URL
+ARG FORGE_SHA256
+ARG OZM_VERSION
+ARG OZM_URL
+ARG OZM_SHA256
+ARG PEAK_VERSION
+ARG PEAK_URL
+ARG PEAK_SHA256
+ARG LPMINER_VERSION
+ARG LPMINER_URL
+ARG LPMINER_SHA256
 
+# lpminer : son dossier lib/ (libstdc++ fourni par l'auteur) est garde a cote du binaire.
 COPY scripts/fetch-miner.sh /usr/local/bin/fetch-miner
 RUN chmod +x /usr/local/bin/fetch-miner \
     && mkdir -p /opt/miners \
-    && fetch-miner srbminer "$SRB_VERSION"   "$SRB_URL"   "$SRB_SHA256"   SRBMiner-MULTI \
-    && fetch-miner xmrig    "$XMRIG_VERSION" "$XMRIG_URL" "$XMRIG_SHA256" xmrig
+    && fetch-miner srbminer     "$SRB_VERSION"     "$SRB_URL"     "$SRB_SHA256"     SRBMiner-MULTI \
+    && fetch-miner xmrig        "$XMRIG_VERSION"   "$XMRIG_URL"   "$XMRIG_SHA256"   xmrig \
+    && fetch-miner forgeminer   "$FORGE_VERSION"   "$FORGE_URL"   "$FORGE_SHA256"   forge \
+    && fetch-miner onezerominer "$OZM_VERSION"     "$OZM_URL"     "$OZM_SHA256"     onezerominer \
+    && fetch-miner peakminer    "$PEAK_VERSION"    "$PEAK_URL"    "$PEAK_SHA256"    peakminer \
+    && fetch-miner lpminer      "$LPMINER_VERSION" "$LPMINER_URL" "$LPMINER_SHA256" lpminer lib
 
 # ---------------------------------------------------------------------------
 # Etape 2 : image finale, sans outils de telechargement
@@ -58,7 +78,7 @@ ENV NVIDIA_VISIBLE_DEVICES=all \
     RESTART_DELAY=10
 
 LABEL org.opencontainers.image.title="rentingminers" \
-      org.opencontainers.image.description="SRBMiner-MULTI (GPU NVIDIA) + XMRig ou SRBMiner-MULTI (CPU, optionnel) ; arguments des mineurs dans GPU_ARGS et CPU_ARGS"
+      org.opencontainers.image.description="GPU NVIDIA : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner ou lpminer (GPU_MINER, GPU_ARGS) ; CPU : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)"
 
 WORKDIR /opt/miners/work
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

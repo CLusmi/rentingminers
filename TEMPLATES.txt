@@ -22,6 +22,34 @@ case par variable, avec la valeur SANS guillemets.
 
 -e CPU_MINER=xmrig -e CPU_ARGS="--coin monero -o xmr.kryptex.network:7029 -u ADRESSE_MONERO/RENT -t 184 -k"
 
+--- Quantus seul (GPU), un mineur au choix ---
+Pools : LuckyPool pl.lproute.com:5660 (ou eu / us-east / sg… .lproute.com, même port),
+Kryptex qtc.kryptex.network:7049. Frais : SRBMiner et ForgeMiner 2 %, OneZeroMiner 2 %,
+PeakMiner 2 %, lpminer non documentés. lpminer ne mine que Quantus, sur LuckyPool.
+
+-e GPU_MINER=srbminer -e GPU_ARGS="--algorithm quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker FARM"
+
+-e GPU_MINER=forgeminer -e GPU_ARGS="--algorithm quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker FARM"
+
+-e GPU_MINER=onezerominer -e GPU_ARGS="-a quantus -o pl.lproute.com:5660 -w ADRESSE_QUANTUS --worker FARM"
+
+-e GPU_MINER=peakminer -e GPU_ARGS="--coin quantus -o pl.lproute.com:5660 -u ADRESSE_QUANTUS -w FARM"
+
+-e GPU_MINER=lpminer -e GPU_ARGS="--algo quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker FARM"
+
+--- Pearl seul (GPU) avec un autre mineur que SRBMiner ---
+
+-e GPU_MINER=forgeminer -e GPU_ARGS="--algorithm pearlhash --pool POOL:PORT --wallet ADRESSE_PEARL --worker FARM"
+
+-e GPU_MINER=onezerominer -e GPU_ARGS="-a pearlhash -o POOL:PORT -w ADRESSE_PEARL --worker FARM"
+
+-e GPU_MINER=peakminer -e GPU_ARGS="--coin pearl -o POOL:PORT -u ADRESSE_PEARL -w FARM"
+
+Pilotes NVIDIA : lpminer demande un pilote 580 ou plus (CUDA 13.2), ForgeMiner 580+ pour les
+RTX 50, OneZeroMiner 528+ ; un mineur qui refuse le pilote s'arrête et se relance en boucle
+(ses lignes dans les logs disent pourquoi). ForgeMiner et OneZeroMiner ont aussi un « qhash » :
+c'est QubitCoin (même ticker QTC), pas Quantus.
+
 Règle : un côté démarre seulement si son MINER et ses ARGS sont renseignés tous les deux.
 Rien n'est prérempli : sans GPU_MINER + GPU_ARGS, pas de minage GPU ; sans CPU_MINER + CPU_ARGS,
 pas de minage CPU.
@@ -46,6 +74,17 @@ docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash -
 --- Ensuite : mode reallocate (demande à Salad une autre machine quand une règle se déclenche) ---
 
 docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash --pool POOL:PORT --wallet ADRESSE_PEARL --worker SALAD --pearl-k1" -e SALAD_WATCHDOG=reallocate -e SALAD_MIN_HASHRATE=5090=385T,4090=300T,3090=125T -e SALAD_GRACE=90 -e SALAD_BAD_READINGS=2 -e SALAD_MAX_RESTARTS=5 -e SALAD_ZERO_READINGS=2 -e SALAD_STALE_MINUTES=2 clusmi/rentingminers:AAAA-MM-JJ-HHMM
+
+--- Quantus sur Salad, SRBMiner, chien de garde (seuil à calibrer en observe : ~1,1 GH/s par 5090) ---
+
+docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=1100M -e SALAD_GRACE=180 -e SALAD_BAD_READINGS=3 -e SALAD_MAX_RESTARTS=5 -e SALAD_ZERO_READINGS=2 -e SALAD_STALE_MINUTES=2 clusmi/rentingminers:AAAA-MM-JJ-HHMM
+
+--- Quantus sur Salad avec un autre mineur : pas de chien de garde (SRBMiner seulement) ---
+
+docker run --gpus all -e GPU_MINER=forgeminer -e GPU_ARGS="--algorithm quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker SALAD" clusmi/rentingminers:AAAA-MM-JJ-HHMM
+(SALAD_WATCHDOG renseigné avec forgeminer, onezerominer, peakminer ou lpminer = ignoré, une
+ligne « pris en charge seulement avec GPU_MINER=srbminer » dans les logs, le mineur tourne
+sans surveillance)
 
 --- Dual : Pearl (GPU) + Monero (CPU, XMRig) sur Salad ---
 

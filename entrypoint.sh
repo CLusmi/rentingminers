@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
-# Lance un mineur sur les GPU (SRBMiner-MULTI) et/ou un mineur sur le CPU (XMRig ou
-# SRBMiner-MULTI). Les arguments sont passes aux mineurs tels quels.
+# Lance un mineur sur les GPU (SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner ou
+# lpminer) et/ou un mineur sur le CPU (XMRig ou SRBMiner-MULTI). Les arguments sont
+# passes aux mineurs tels quels.
 #
 # Rien n'est lance par defaut : un cote demarre seulement si SON mineur ET SES
 # arguments sont renseignes. GPU seul, CPU seul ou les deux, au choix.
 #
 # Variables :
-#   GPU_MINER      srbminer (seule valeur possible, XMRig ne mine que sur CPU)
-#   GPU_ARGS       arguments SRBMiner
-#                  ex. --algorithm pearlhash --pool prl.kryptex.network:7048 --wallet ADRESSE --worker FARM
+#   GPU_MINER      srbminer | forgeminer | onezerominer | peakminer | lpminer
+#                  (XMRig ne mine que sur CPU)
+#   GPU_ARGS       arguments du mineur GPU, dans sa propre syntaxe :
+#                  srbminer     --algorithm pearlhash --pool POOL:PORT --wallet ADRESSE --worker NOM --pearl-k1
+#                               --algorithm quantus   --pool POOL:PORT --wallet ADRESSE --worker NOM
+#                  forgeminer   --algorithm pearlhash|quantus --pool POOL:PORT --wallet ADRESSE --worker NOM
+#                  onezerominer -a pearlhash|quantus -o POOL:PORT -w ADRESSE --worker NOM
+#                  peakminer    --coin pearl|quantus -o POOL:PORT -u ADRESSE -w NOM
+#                  lpminer      --algo quantus --pool POOL:PORT --wallet ADRESSE --worker NOM  (Quantus, LuckyPool)
 #   CPU_MINER      xmrig | srbminer
 #   CPU_ARGS       arguments du mineur CPU
 #                  ex. --coin monero -o xmr.kryptex.network:7029 -u ADRESSE/RENT -t 184 -k
@@ -30,10 +37,15 @@
 #   SALAD_STALE_MINUTES verdict apres N minutes sans nouvelle statistique du mineur GPU
 #                       (defaut 2, ou deux fois l'intervalle entre deux statistiques si plus long ; 0 = inactif)
 #
+# Le chien de garde Salad lit le log de SRBMiner : avec un autre mineur GPU, il est
+# ignore (une ligne le dit dans les logs).
+#
 # Options ajoutees automatiquement, sauf si elles sont deja dans tes arguments :
 #   SRBMiner GPU : --disable-cpu --log-file
 #   SRBMiner CPU : --disable-gpu --disable-numa-binding --log-file (dans un dossier a part)
 #   XMRig        : --randomx-no-numa --no-color
+#   ForgeMiner, PeakMiner : --no-color   (logs lisibles sans terminal)
+#   lpminer      : variable LP_DISABLE_HOTKEYS=1 (pas de clavier dans un conteneur)
 #
 # Avec des arguments (docker run image --help), SRBMiner est lance directement
 # avec ces arguments ; une commande (bash, nvidia-smi) est executee.
@@ -42,6 +54,11 @@ set -uo pipefail
 MINERS_DIR=/opt/miners
 srb="$MINERS_DIR/srbminer/SRBMiner-MULTI"
 xmrig="$MINERS_DIR/xmrig/xmrig"
+forge="$MINERS_DIR/forgeminer/forge"
+ozm="$MINERS_DIR/onezerominer/onezerominer"
+peak="$MINERS_DIR/peakminer/peakminer"
+lpminer="$MINERS_DIR/lpminer/lpminer"
+GPU_MINERS="srbminer, forgeminer, onezerominer, peakminer, lpminer"
 
 log() { echo "[rentingminers] $*"; }
 die() { echo "[rentingminers] ERREUR: $*" >&2; exit 1; }
@@ -216,7 +233,7 @@ gpu_on=0
 cpu_on=0
 if [[ -n "${GPU_MINER:-}" && -n "${GPU_ARGS:-}" ]]; then gpu_on=1
 elif [[ -n "${GPU_MINER:-}" ]]; then die "GPU_MINER est renseigne mais GPU_ARGS manque (ou vide)."
-elif [[ -n "${GPU_ARGS:-}" ]]; then die "GPU_ARGS est renseigne mais GPU_MINER manque (GPU_MINER=srbminer)."
+elif [[ -n "${GPU_ARGS:-}" ]]; then die "GPU_ARGS est renseigne mais GPU_MINER manque (GPU_MINER=srbminer, forgeminer, onezerominer, peakminer ou lpminer)."
 fi
 if [[ -n "${CPU_MINER:-}" && -n "${CPU_ARGS:-}" ]]; then cpu_on=1
 elif [[ -n "${CPU_MINER:-}" ]]; then die "CPU_MINER est renseigne mais CPU_ARGS manque (ou vide)."
@@ -226,29 +243,60 @@ if [[ $gpu_on -eq 0 && $cpu_on -eq 0 ]]; then
   die "rien a miner : renseigne GPU_MINER + GPU_ARGS (GPU), CPU_MINER + CPU_ARGS (CPU), ou les deux."
 fi
 
-# --- GPU : SRBMiner ------------------------------------------------------------
+# --- GPU : SRBMiner, ForgeMiner, OneZeroMiner, PeakMiner ou lpminer ---------------
+# SRBMiner passe par son fichier de log (recopie dans les logs du conteneur plus bas,
+# et lu par le chien de garde Salad). Les autres ecrivent directement dans les logs
+# du conteneur, avec leurs arguments tels quels.
 gpu_cmd=()
 gpu_log=""
+gpu_miner=""
 if [[ $gpu_on -eq 1 ]]; then
   gpu_miner=$(lower "$GPU_MINER")
   case "$gpu_miner" in
-    srb|srbminer|srbminer-multi) gpu_miner=srbminer ;;
-    xmrig) die "GPU_MINER=xmrig : XMRig ne mine que sur CPU. Pour le GPU, GPU_MINER=srbminer." ;;
-    *) die "GPU_MINER=${GPU_MINER} inconnu. Seule valeur possible : srbminer." ;;
+    srb|srbminer|srbminer-multi)  gpu_miner=srbminer ;;
+    forge|forgeminer)             gpu_miner=forgeminer ;;
+    ozm|onezero|onezerominer)     gpu_miner=onezerominer ;;
+    peak|peakminer)               gpu_miner=peakminer ;;
+    lp|lpminer|lpminerquantus)    gpu_miner=lpminer ;;
+    xmrig) die "GPU_MINER=xmrig : XMRig ne mine que sur CPU. Pour le GPU : ${GPU_MINERS}." ;;
+    *) die "GPU_MINER=${GPU_MINER} inconnu. Valeurs possibles : ${GPU_MINERS}." ;;
   esac
-  [[ -x "$srb" ]] || die "binaire introuvable : $srb"
   split_args "$GPU_ARGS" gpu_user
-  gpu_cmd=("$srb")
-  has_opt --disable-cpu "${gpu_user[@]}" || gpu_cmd+=(--disable-cpu)
-  # SRBMiner n'ecrit rien sur la sortie standard hors terminal : on passe par son
-  # fichier de log, recopie dans les logs du conteneur plus bas.
-  gpu_log=$(opt_value --log-file "${gpu_user[@]}")
-  if [[ -z "$gpu_log" ]]; then
-    gpu_log="$PWD/srbminer-gpu.log"
-    gpu_cmd+=(--log-file "$gpu_log")
-  elif [[ "$gpu_log" != /* ]]; then
-    gpu_log="$PWD/$gpu_log"
-  fi
+  case "$gpu_miner" in
+    srbminer)
+      [[ -x "$srb" ]] || die "binaire introuvable : $srb"
+      gpu_cmd=("$srb")
+      has_opt --disable-cpu "${gpu_user[@]}" || gpu_cmd+=(--disable-cpu)
+      # SRBMiner n'ecrit rien sur la sortie standard hors terminal : on passe par son
+      # fichier de log, recopie dans les logs du conteneur plus bas.
+      gpu_log=$(opt_value --log-file "${gpu_user[@]}")
+      if [[ -z "$gpu_log" ]]; then
+        gpu_log="$PWD/srbminer-gpu.log"
+        gpu_cmd+=(--log-file "$gpu_log")
+      elif [[ "$gpu_log" != /* ]]; then
+        gpu_log="$PWD/$gpu_log"
+      fi
+      ;;
+    forgeminer)
+      [[ -x "$forge" ]] || die "binaire introuvable : $forge"
+      gpu_cmd=("$forge")
+      has_opt --no-color "${gpu_user[@]}" || has_opt --plain "${gpu_user[@]}" || gpu_cmd+=(--no-color)
+      ;;
+    onezerominer)
+      [[ -x "$ozm" ]] || die "binaire introuvable : $ozm"
+      gpu_cmd=("$ozm")
+      ;;
+    peakminer)
+      [[ -x "$peak" ]] || die "binaire introuvable : $peak"
+      gpu_cmd=("$peak")
+      has_opt --no-color "${gpu_user[@]}" || gpu_cmd+=(--no-color)
+      ;;
+    lpminer)
+      [[ -x "$lpminer" ]] || die "binaire introuvable : $lpminer"
+      # Bibliotheques fournies avec le mineur (lib/), et pas de raccourcis clavier.
+      gpu_cmd=(env "LD_LIBRARY_PATH=$MINERS_DIR/lpminer/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" LP_DISABLE_HOTKEYS=1 "$lpminer")
+      ;;
+  esac
   gpu_cmd+=("${gpu_user[@]}")
   log "GPU ($gpu_miner) : $(show_cmd "${gpu_cmd[@]}")"
 else
@@ -322,6 +370,8 @@ if [[ -n "${SALAD_WATCHDOG:-}" ]]; then
     log "Chien de garde Salad : SALAD_WATCHDOG est renseigne mais ce conteneur ne tourne pas sur Salad (SALAD_MACHINE_ID absent) : ignore."
   elif [[ $gpu_on -eq 0 ]]; then
     log "Chien de garde Salad : pas de mineur GPU a surveiller : ignore."
+  elif [[ "$gpu_miner" != srbminer ]]; then
+    log "Chien de garde Salad : pris en charge seulement avec GPU_MINER=srbminer (ici ${gpu_miner}) : ignore, le mineur tourne sans surveillance."
   else
     if [[ -n "${SALAD_MIN_HASHRATE:-}" ]]; then
       IFS=',; ' read -r -a wd_entries <<< "${SALAD_MIN_HASHRATE//[$'\t\n']/ }"
