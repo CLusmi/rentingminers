@@ -39,8 +39,18 @@
 #   SALAD_STALE_MINUTES verdict apres N minutes sans nouvelle statistique du mineur GPU
 #                       (defaut 2, ou deux fois l'intervalle entre deux statistiques si plus long ; 0 = inactif)
 #
-# Le chien de garde Salad lit le log de SRBMiner : avec un autre mineur GPU, il est
-# ignore (une ligne le dit dans les logs).
+# Le chien de garde lit le hashrate dans le log du mineur GPU, quel qu'il soit :
+# SRBMiner avec son format (GPU0 RTX 5090: 342.10 TH/s), les autres par lecture
+# generique de la derniere ligne contenant un hashrate (valeur + H/s, KH/s, MH/s,
+# GH/s, TH/s ; « hs », « khs »... acceptes), le modele de la carte venant de nvidia-smi.
+#   SALAD_HASHRATE_MATCH   regex qu'une ligne doit contenir pour etre lue (defaut selon le
+#                          mineur, ex. ^\[stats\] pour ariaenergy ; « . » = toutes)
+#   SALAD_HASHRATE_IGNORE  regex des lignes a ignorer (defaut : network|difficulty|diff=|pool hashrate|reward)
+# Pour les mineurs autres que SRBMiner, l'image ecrit en plus, a chaque nouvelle lecture
+# (toutes les 30 s au plus), une ligne au format SRBMiner dans les logs du conteneur :
+#   [rentingminers] GPU0 RTX 5090: 113.75 TH/s
+# C'est cette ligne que Salad-Switch-Log et Vast-Switch-Log lisent (menu machines,
+# rentabilite), sans rien changer chez eux.
 #
 # Options ajoutees automatiquement, sauf si elles sont deja dans tes arguments :
 #   SRBMiner GPU : --disable-cpu --log-file
@@ -177,19 +187,39 @@ parse_threshold() {
   return 1
 }
 
-# Derniere ligne de statistiques GPU de SRBMiner dans le log ($1), nettoyee.
-# Formats reconnus :  GPU0 RTX 5090: 342.10 TH/s [T:71C ...]   (ligne compacte)
-#                     #0 RTX 5090 342.10 TH/s 400.0W ...         (ligne du tableau)
+# Derniere ligne de statistiques GPU dans le log ($1), nettoyee.
+# SRBMiner, formats reconnus :  GPU0 RTX 5090: 342.10 TH/s [T:71C ...]   (ligne compacte)
+#                               #0 RTX 5090 342.10 TH/s 400.0W ...         (ligne du tableau)
+# Autres mineurs : derniere ligne qui contient un hashrate (valeur + unite H/s, KH/s,
+# MH/s, GH/s, TH/s, ou hs/khs/mhs/ghs/ths), qui contient SALAD_HASHRATE_MATCH et pas
+# SALAD_HASHRATE_IGNORE (ex. ariaenergy : [stats] 113.75 TH/s | accepted 33 ...).
 wd_last_reading() {
-  tail -n 300 "$1" 2>/dev/null | strip_ansi \
-    | grep -aE '(GPU[0-9]+[[:space:]]+[^:]+:|#[0-9]+[[:space:]]+[^[:space:]]).*[0-9][[:space:]]*[KkMmGgTt]?[Hh]/s' \
-    | tail -n 1
+  if [[ "$gpu_miner" == srbminer ]]; then
+    tail -n 300 "$1" 2>/dev/null | strip_ansi \
+      | grep -aE '(GPU[0-9]+[[:space:]]+[^:]+:|#[0-9]+[[:space:]]+[^[:space:]]).*[0-9][[:space:]]*[KkMmGgTt]?[Hh]/s' \
+      | tail -n 1
+  else
+    tail -n 300 "$1" 2>/dev/null | strip_ansi \
+      | grep -aE '[0-9]([.][0-9]+)?[[:space:]]*[KkMmGgTt]?[Hh]/?[Ss]([^A-Za-z]|$)' \
+      | grep -aE "$hr_match" | grep -aivE "$hr_ignore" \
+      | tail -n 1
+  fi
 }
 
 # Decoupe une ligne de statistiques en modele / valeur / unite (variables wd_model,
-# wd_value, wd_unit). Vrai si la ligne est comprise.
+# wd_value, wd_unit). Vrai si la ligne est comprise. Pour les mineurs autres que
+# SRBMiner : premier hashrate de la ligne, modele de la carte lu par nvidia-smi.
 wd_parse_reading() {
   local line="$1"
+  if [[ "$gpu_miner" != srbminer ]]; then
+    if [[ "$line" =~ (^|[^0-9.])([0-9]+(\.[0-9]+)?)[[:space:]]*([KkMmGgTt]?)[Hh]/?[Ss]([^A-Za-z]|$) ]]; then
+      wd_model="$gpu_model"
+      wd_value="${BASH_REMATCH[2]}"
+      wd_unit="${BASH_REMATCH[4]}"
+      return 0
+    fi
+    return 1
+  fi
   if [[ "$line" =~ GPU[0-9]+[[:space:]]+([^:]+):[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*([KkMmGgTt]?)[Hh]/s ]] \
      || [[ "$line" =~ \#[0-9]+[[:space:]]+(.+[^[:space:]])[[:space:]]+([0-9]+(\.[0-9]+)?)[[:space:]]*([KkMmGgTt]?)[Hh]/s ]]; then
     wd_model="${BASH_REMATCH[1]}"
@@ -200,6 +230,15 @@ wd_parse_reading() {
     return 0
   fi
   return 1
+}
+
+# Modele de la carte vu par nvidia-smi (« RTX 5090 »), ou « GPU » si inconnu.
+detect_gpu_model() {
+  local name
+  name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1)
+  name="${name#NVIDIA }"; name="${name#GeForce }"
+  name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"
+  [[ -n "$name" ]] && echo "$name" || echo "GPU"
 }
 
 # Seuil (tel qu'ecrit par l'utilisateur) pour un modele de carte, premiere cle qui
@@ -308,10 +347,23 @@ if [[ $gpu_on -eq 1 ]]; then
       gpu_cmd=("$aria")
       ;;
   esac
+  # Les mineurs autres que SRBMiner ecrivent sur leur sortie : elle est gardee dans un
+  # fichier (recopie dans les logs du conteneur) pour que le hashrate puisse y etre lu.
+  [[ -n "$gpu_log" ]] || gpu_log="$PWD/gpu-${gpu_miner}.log"
   gpu_cmd+=("${gpu_user[@]}")
   log "GPU ($gpu_miner) : $(show_cmd "${gpu_cmd[@]}")"
 else
   log "GPU : desactive (GPU_MINER et GPU_ARGS vides)."
+fi
+
+# Filtres de lecture du hashrate (mineurs autres que SRBMiner) : ligne a retenir, lignes a ignorer.
+hr_match="${SALAD_HASHRATE_MATCH:-}"
+hr_ignore="${SALAD_HASHRATE_IGNORE:-network|difficulty|diff=|pool hashrate|reward}"
+if [[ -z "$hr_match" ]]; then
+  case "$gpu_miner" in
+    ariaenergy) hr_match='^\[stats\]' ;;
+    *) hr_match='.' ;;
+  esac
 fi
 
 # --- CPU : XMRig ou SRBMiner --------------------------------------------------
@@ -381,8 +433,6 @@ if [[ -n "${SALAD_WATCHDOG:-}" ]]; then
     log "Chien de garde Salad : SALAD_WATCHDOG est renseigne mais ce conteneur ne tourne pas sur Salad (SALAD_MACHINE_ID absent) : ignore."
   elif [[ $gpu_on -eq 0 ]]; then
     log "Chien de garde Salad : pas de mineur GPU a surveiller : ignore."
-  elif [[ "$gpu_miner" != srbminer ]]; then
-    log "Chien de garde Salad : pris en charge seulement avec GPU_MINER=srbminer (ici ${gpu_miner}) : ignore, le mineur tourne sans surveillance."
   else
     if [[ -n "${SALAD_MIN_HASHRATE:-}" ]]; then
       IFS=',; ' read -r -a wd_entries <<< "${SALAD_MIN_HASHRATE//[$'\t\n']/ }"
@@ -427,12 +477,18 @@ fi
 if [[ $gpu_on -eq 1 ]] && ! ls /dev/nvidia* >/dev/null 2>&1 && [[ ! -e /usr/lib/x86_64-linux-gnu/libcuda.so.1 ]]; then
   log "ATTENTION : aucun GPU NVIDIA visible dans le conteneur (lancer avec --gpus all)."
 fi
+gpu_model="GPU"
+if [[ $gpu_on -eq 1 && "$gpu_miner" != srbminer ]]; then
+  gpu_model=$(detect_gpu_model)
+  log "Carte vue par nvidia-smi : ${gpu_model} ; hashrate lu dans les lignes de ${gpu_miner} (filtre « ${hr_match} »), recopie au format « GPU0 ${gpu_model}: ... » dans ces logs."
+fi
 
 # --- Lancement et surveillance -------------------------------------------------
 gpu_pid=0
 cpu_pid=0
 gpu_tailer=0
 cpu_tailer=0
+relay_pid=0
 delay="${RESTART_DELAY:-10}"
 
 # Journaux SRBMiner recopies dans les logs du conteneur (lignes CPU prefixees [cpu]).
@@ -451,8 +507,33 @@ if [[ -n "$cpu_dir" ]]; then
 fi
 
 start_gpu() {
-  "${gpu_cmd[@]}" &
+  if [[ "$gpu_miner" == srbminer ]]; then
+    "${gpu_cmd[@]}" &
+  elif [[ -t 1 ]]; then
+    "${gpu_cmd[@]}" > >(tee -a "$gpu_log") 2>&1 &
+  else
+    "${gpu_cmd[@]}" >> "$gpu_log" 2>&1 &
+  fi
   gpu_pid=$!
+}
+
+# Mineurs autres que SRBMiner : a chaque nouvelle lecture de hashrate dans leur log, une
+# ligne au format SRBMiner dans les logs du conteneur, pour Salad-Switch-Log et
+# Vast-Switch-Log : « [rentingminers] GPU0 RTX 5090: 113.75 TH/s ».
+hashrate_relay() {
+  local interval="${SALAD_WD_INTERVAL:-30}" line last="" shown=0
+  while true; do
+    sleep "$interval"
+    line=$(wd_last_reading "$gpu_log")
+    [[ -z "$line" || "$line" == "$last" ]] && continue
+    last="$line"
+    wd_parse_reading "$line" || continue
+    if [[ $shown -eq 0 ]]; then
+      shown=1
+      log "Lecture du hashrate (${gpu_miner}) : « ${line} » -> ${wd_value} ${wd_unit}H/s (${wd_model})."
+    fi
+    echo "[rentingminers] GPU0 ${wd_model}: ${wd_value} ${wd_unit}H/s"
+  done
 }
 
 start_cpu() {
@@ -622,6 +703,7 @@ salad_watchdog() {
 stop() {
   log "Arret demande, fermeture des mineurs..."
   [[ $wd_pid -ne 0 ]] && kill "$wd_pid" 2>/dev/null
+  [[ $relay_pid -ne 0 ]] && kill "$relay_pid" 2>/dev/null
   for pid in "$gpu_pid" "$cpu_pid"; do
     [[ $pid -ne 0 ]] && kill -TERM "$pid" 2>/dev/null
   done
@@ -637,6 +719,10 @@ trap stop TERM INT
 
 [[ $gpu_on -eq 1 ]] && start_gpu
 [[ $cpu_on -eq 1 ]] && start_cpu
+if [[ $gpu_on -eq 1 && "$gpu_miner" != srbminer ]]; then
+  hashrate_relay &
+  relay_pid=$!
+fi
 if [[ $wd_on -eq 1 ]]; then
   : > "$wd_restart_file"
   salad_watchdog &

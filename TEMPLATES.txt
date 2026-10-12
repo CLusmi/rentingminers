@@ -84,19 +84,27 @@ docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm pearlhash -
 
 docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=1100M -e SALAD_GRACE=180 -e SALAD_BAD_READINGS=3 -e SALAD_MAX_RESTARTS=5 -e SALAD_ZERO_READINGS=2 -e SALAD_STALE_MINUTES=2 clusmi/rentingminers:AAAA-MM-JJ-HHMM
 
---- Quantus sur Salad avec un autre mineur : pas de chien de garde (SRBMiner seulement) ---
+--- Pearl sur Salad, ARIAEnergy, chien de garde en observe (seuil à calibrer sur SON hashrate affiché) ---
 
-docker run --gpus all -e GPU_MINER=forgeminer -e GPU_ARGS="--algorithm quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker SALAD" clusmi/rentingminers:AAAA-MM-JJ-HHMM
-(SALAD_WATCHDOG renseigné avec forgeminer, onezerominer, peakminer, lpminer ou ariaenergy = ignoré, une
-ligne « pris en charge seulement avec GPU_MINER=srbminer » dans les logs, le mineur tourne
-sans surveillance)
+docker run --gpus all -e GPU_MINER=ariaenergy -e GPU_ARGS="--pool POOL:PORT --wallet ADRESSE_PEARL --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=100T -e SALAD_GRACE=180 -e SALAD_BAD_READINGS=3 -e SALAD_MAX_RESTARTS=5 -e SALAD_ZERO_READINGS=2 -e SALAD_STALE_MINUTES=2 clusmi/rentingminers:AAAA-MM-JJ-HHMM
+(le chien de garde marche avec tous les mineurs GPU : il lit la dernière ligne de hashrate du
+mineur et écrit « [rentingminers] GPU0 RTX 5090: 113.75 TH/s » dans les logs, que Salad-Switch-Log
+affiche ; chaque mineur affiche son hashrate à sa façon, donc un seuil se calibre par mineur,
+en observe, avant de passer en reallocate ; ARIAEnergy met 1 à 2 min avant sa première ligne)
+
+--- Quantus sur Salad avec un autre mineur que SRBMiner, mêmes variables de chien de garde ---
+
+docker run --gpus all -e GPU_MINER=forgeminer -e GPU_ARGS="--algorithm quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=1100M -e SALAD_GRACE=180 -e SALAD_BAD_READINGS=3 -e SALAD_ZERO_READINGS=2 -e SALAD_STALE_MINUTES=2 clusmi/rentingminers:AAAA-MM-JJ-HHMM
+(pour ForgeMiner, OneZeroMiner, PeakMiner et lpminer, le filtre de lecture est générique tant que
+leurs vraies lignes n'ont pas été vues : commence en observe et vérifie la ligne « Lecture du
+hashrate (...) » dans les logs ; SALAD_HASHRATE_MATCH / SALAD_HASHRATE_IGNORE pour corriger)
 
 --- Dual : Pearl (GPU) + Monero (CPU, XMRig) sur Salad ---
 
 ajoute -e CPU_MINER=xmrig -e CPU_ARGS="--coin monero -o xmr.kryptex.network:7029 -u ADRESSE_MONERO/RENT -t 2 -k"
 (sur Salad, le nombre de vCPU du groupe est petit : adapte -t au nombre de vCPU demandé)
 
-Règles du chien de garde (actif seulement sur Salad, jamais sur vast.ai) :
+Règles du chien de garde (actif seulement sur Salad, jamais sur vast.ai ; tous les mineurs GPU) :
 - après le répit (SALAD_GRACE, en secondes) suivant chaque démarrage du mineur GPU,
   SALAD_BAD_READINGS lectures consécutives sous le seuil de la carte donnent un verdict ;
 - une carte dont le modèle n'est pas dans SALAD_MIN_HASHRATE n'est pas surveillée (ligne

@@ -3,9 +3,9 @@
 #                  ARIAEnergy PRL (GPU_MINER, GPU_ARGS)
 #   - CPU        : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)
 # Un cote ne demarre que si son mineur ET ses arguments sont renseignes.
-# Sur SaladCloud, un chien de garde facultatif (SALAD_WATCHDOG, SRBMiner
-# seulement) demande une autre machine quand la carte est trop lente (voir
-# entrypoint.sh).
+# Sur SaladCloud, un chien de garde facultatif (SALAD_WATCHDOG) demande une
+# autre machine quand la carte est trop lente, quel que soit le mineur GPU
+# (voir entrypoint.sh).
 #
 # Les versions, URL et empreintes sont fournies par le workflow GitHub
 # (scripts/resolve-versions.sh). Chaque fichier est telecharge depuis la page

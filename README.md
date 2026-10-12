@@ -8,8 +8,8 @@ Image Docker pour miner sur des machines louées (vast.ai, SaladCloud, Clore.ai�
 
 GPU seul, CPU seul ou les deux : **rien ne démarre sans choix explicite**. Les arguments
 des mineurs sont donnés **tels quels**, dans leur syntaxe d'origine. Sur SaladCloud, un
-chien de garde facultatif (SRBMiner seulement) peut demander une autre machine quand la
-carte est trop lente (voir plus bas).
+chien de garde facultatif peut demander une autre machine quand la carte est trop lente,
+quel que soit le mineur GPU (voir plus bas).
 Image publiée : `clusmi/rentingminers:latest` (publique).
 
 ## Comment l'image est construite
@@ -93,6 +93,7 @@ dans un conteneur. **Une option déjà présente dans tes arguments n'est pas aj
 | OneZeroMiner | rien | |
 | lpminer | variable `LP_DISABLE_HOTKEYS=1` (et ses bibliothèques `lib/`) | pas de clavier dans un conteneur |
 | ARIAEnergy PRL | lancé par `run-all.sh` : un processus par carte visible, `--worker NOM-gpuN` s'il y a plusieurs cartes | le mineur ne mine qu'une carte par processus |
+| tous les mineurs GPU | leur sortie est gardée dans un fichier (`gpu-<mineur>.log`, recopié dans les logs) | le hashrate y est lu (chien de garde, ligne `GPU0 … H/s` pour les outils) |
 | SRBMiner CPU | `--disable-gpu`, `--disable-numa-binding`, `--log-file` | CPU seulement ; voir « machines à plusieurs processeurs » |
 | XMRig | `--randomx-no-numa`, `--no-color` | idem ; logs lisibles |
 
@@ -140,9 +141,24 @@ de log préfixée `[gpuN]`. Si un processus s'arrête, les autres sont arrêtés
 est relancé. Au démarrage, le mineur fait un auto-test (une preuve complète vérifiée) puis
 un auto-réglage de ses kernels : compte une à deux minutes avant le premier hashrate.
 
-Le chien de garde Salad lit le log de SRBMiner : avec un autre mineur GPU, il est ignoré
-(ligne `pris en charge seulement avec GPU_MINER=srbminer` dans les logs) et le mineur
-tourne sans surveillance.
+**Hashrate lu pour tous les mineurs.** SRBMiner écrit `GPU0 RTX 5090: 342.10 TH/s` ; pour
+les autres, l'image lit la dernière ligne de leur log qui contient un hashrate (`H/s`,
+`KH/s`, `MH/s`, `GH/s`, `TH/s`, ou `hs`, `khs`…), prend le modèle de la carte dans
+`nvidia-smi`, et écrit elle-même dans les logs, à chaque nouvelle lecture (30 s au plus),
+une ligne au format SRBMiner : `[rentingminers] GPU0 RTX 5090: 113.75 TH/s`. C'est cette
+ligne que Salad-Switch-Log et Vast-Switch-Log affichent (menu machines, rentabilité) et
+que le chien de garde surveille. La première lecture est détaillée dans les logs
+(`Lecture du hashrate (ariaenergy) : « [stats] 113.75 TH/s | … » -> 113.75 TH/s`), pour
+vérifier que la bonne ligne est prise.
+
+| Mineur | Ligne lue (filtre par défaut) |
+|---|---|
+| ARIAEnergy PRL | `[stats] 113.75 TH/s \| accepted 33 rejected 0 dropped 1 \| …` (filtre `^\[stats\]`) |
+| ForgeMiner, OneZeroMiner, PeakMiner, lpminer | dernière ligne contenant un hashrate, hors lignes `network`, `difficulty`, `diff=`, `pool hashrate`, `reward` (à vérifier en mode `observe` sur leurs vraies lignes) |
+
+Deux variables pour corriger un filtre sans reconstruire l'image : `SALAD_HASHRATE_MATCH`
+(regex qu'une ligne doit contenir, ex. `^\[stats\]` ; `.` = toutes) et
+`SALAD_HASHRATE_IGNORE` (regex des lignes à ignorer).
 
 ## Exemples de templates
 
@@ -244,8 +260,9 @@ Quelques algorithmes CPU de SRBMiner (liste complète sur sa page GitHub) : `ran
 ## SaladCloud : chien de garde
 
 Sur Salad, chaque replica tourne sur le PC d'un particulier, avec une carte parfois bridée
-ou utilisée en même temps. Le chien de garde lit le hashrate dans le log SRBMiner et, si la
-carte est trop lente, demande à Salad de déplacer le conteneur sur une autre machine (via
+ou utilisée en même temps. Le chien de garde lit le hashrate dans le log du mineur GPU
+(SRBMiner ou un autre, voir « Mineurs GPU ») et, si la carte est trop lente, demande à
+Salad de déplacer le conteneur sur une autre machine (via
 le service de métadonnées de Salad, `169.254.169.254/v1/reallocate`). Il n'est actif que
 sur Salad (variable `SALAD_MACHINE_ID` injectée par Salad) **et** si `SALAD_WATCHDOG` est
 renseigné : sur vast.ai, rien ne change.
@@ -258,10 +275,11 @@ renseigné : sur vast.ai, rien ne change.
 | `SALAD_BAD_READINGS` | `3` | lectures consécutives sous le seuil avant verdict |
 | `SALAD_MAX_RESTARTS` | `5` | verdict si le mineur GPU redémarre au moins N fois en 10 min (inactif si absent) |
 | `SALAD_ZERO_READINGS` | `2` | verdict après N lectures consécutives à 0 H/s (2 par défaut ; `0` = règle désactivée) |
-| `SALAD_STALE_MINUTES` | `2` | verdict après N minutes sans nouvelle statistique du mineur GPU (2 par défaut ; `0` = désactivée). Si SRBMiner publie ses statistiques moins souvent, la limite devient deux fois cet intervalle, pour ne pas juger entre deux lignes |
+| `SALAD_STALE_MINUTES` | `2` | verdict après N minutes sans nouvelle statistique du mineur GPU (2 par défaut ; `0` = désactivée). Si le mineur publie ses statistiques moins souvent, la limite devient deux fois cet intervalle, pour ne pas juger entre deux lignes |
+| `SALAD_HASHRATE_MATCH`, `SALAD_HASHRATE_IGNORE` | `^\[stats\]` | mineurs autres que SRBMiner : ligne à retenir / lignes à ignorer (regex), voir « Mineurs GPU » |
 
 Déroulement : après le répit, une lecture toutes les 30 s (SRBMiner publie ses statistiques
-toutes les 30 à 90 s, seules les nouvelles comptent) ; `SALAD_BAD_READINGS` lectures
+toutes les 30 à 90 s, ARIAEnergy toutes les 10 s ; seules les nouvelles comptent) ; `SALAD_BAD_READINGS` lectures
 consécutives sous le seuil donnent un verdict, une lecture au-dessus remet le compteur à
 zéro. Une lecture à 0 ne compte pas pour le seuil mais pour `SALAD_ZERO_READINGS` : deux
 lectures à 0 de suite et la machine est jugée en panne. Plus aucune ligne de statistiques
@@ -273,7 +291,11 @@ puis `reallocate`. Les seuils se placent vers 85 % du hashrate d'une carte saine
 overclock** (sur Salad, impossible d'overclocker) : un seuil au-dessus de ce que font tes
 cartes fait réallouer **toutes** les machines, sans fin. Lis le hashrate réel dans le menu 2
 de Salad-Switch-Log avant de fixer les seuils, et refais-le après un changement de version
-de SRBMiner ou d'option (`--pearl-k1`).
+de SRBMiner ou d'option (`--pearl-k1`), **et après un changement de mineur** : chaque mineur
+mesure et affiche son hashrate à sa façon (ARIAEnergy affiche le débit mesuré de la carte,
+pas ce que la pool crédite), les seuils ne se transposent pas d'un mineur à l'autre. Pour
+ARIAEnergy, compte le répit (`SALAD_GRACE`) large : 1 à 2 min d'auto-test et d'auto-réglage
+avant la première ligne `[stats]`.
 
 Exemple (Docker Run dans Salad) :
 
@@ -319,8 +341,11 @@ tous les replicas.
   ou ForgeMiner…).
 - **`GPU_MINER=... inconnu`** : valeurs possibles `srbminer`, `forgeminer`, `onezerominer`,
   `peakminer`, `lpminer`, `ariaenergy`.
-- **`pris en charge seulement avec GPU_MINER=srbminer`** : le chien de garde Salad est
-  renseigné avec un autre mineur GPU ; il est ignoré, le mineur tourne sans surveillance.
+- **Pas de ligne `GPU0 … H/s` avec un mineur autre que SRBMiner** (menu 2 de
+  Salad-Switch-Log vide, verdicts `plus aucune statistique`) : la ligne de hashrate du mineur
+  n'est pas reconnue par le filtre. Regarde ses lignes dans les logs et règle
+  `SALAD_HASHRATE_MATCH` / `SALAD_HASHRATE_IGNORE` (la première lecture reconnue est
+  détaillée dans les logs : `Lecture du hashrate (…)`).
 - **Hashrate CPU très bas** : cherche `slow mode` (XMRig) dans les logs, et vérifie que la
   ligne `[rentingminers] CPU` contient `--randomx-no-numa` (XMRig) ou
   `--disable-numa-binding` (SRBMiner).
