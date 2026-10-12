@@ -1,6 +1,6 @@
 # Image de minage pour GPU loues (vast.ai, SaladCloud, Clore.ai...) :
-#   - GPU NVIDIA : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner ou lpminer
-#                  (GPU_MINER, GPU_ARGS)
+#   - GPU NVIDIA : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner, lpminer ou
+#                  ARIAEnergy PRL (GPU_MINER, GPU_ARGS)
 #   - CPU        : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)
 # Un cote ne demarre que si son mineur ET ses arguments sont renseignes.
 # Sur SaladCloud, un chien de garde facultatif (SALAD_WATCHDOG, SRBMiner
@@ -9,8 +9,8 @@
 #
 # Les versions, URL et empreintes sont fournies par le workflow GitHub
 # (scripts/resolve-versions.sh). Chaque fichier est telecharge depuis la page
-# GitHub officielle du mineur (lpminer : eu.lproute.com, version et empreinte
-# figees) et verifie avant installation.
+# GitHub officielle du mineur (lpminer : eu.lproute.com ; ariaenergy-prl :
+# dl.ariabrain.com ; versions et empreintes figees) et verifie avant installation.
 
 # ---------------------------------------------------------------------------
 # Etape 1 : telechargement et verification des mineurs
@@ -40,8 +40,13 @@ ARG PEAK_SHA256
 ARG LPMINER_VERSION
 ARG LPMINER_URL
 ARG LPMINER_SHA256
+ARG ARIA_VERSION
+ARG ARIA_URL
+ARG ARIA_SHA256
 
 # lpminer : son dossier lib/ (libstdc++ fourni par l'auteur) est garde a cote du binaire.
+# ariaenergy-prl : son runtime CUDA 13, son second build cuda12/ (pilotes 525-579) et son
+# lanceur run.sh (qui choisit le build selon le pilote) sont gardes aussi.
 COPY scripts/fetch-miner.sh /usr/local/bin/fetch-miner
 RUN chmod +x /usr/local/bin/fetch-miner \
     && mkdir -p /opt/miners \
@@ -50,7 +55,8 @@ RUN chmod +x /usr/local/bin/fetch-miner \
     && fetch-miner forgeminer   "$FORGE_VERSION"   "$FORGE_URL"   "$FORGE_SHA256"   forge \
     && fetch-miner onezerominer "$OZM_VERSION"     "$OZM_URL"     "$OZM_SHA256"     onezerominer \
     && fetch-miner peakminer    "$PEAK_VERSION"    "$PEAK_URL"    "$PEAK_SHA256"    peakminer \
-    && fetch-miner lpminer      "$LPMINER_VERSION" "$LPMINER_URL" "$LPMINER_SHA256" lpminer lib
+    && fetch-miner lpminer      "$LPMINER_VERSION" "$LPMINER_URL" "$LPMINER_SHA256" lpminer lib \
+    && fetch-miner ariaenergy   "$ARIA_VERSION"    "$ARIA_URL"    "$ARIA_SHA256"    ariaenergy-prl libcudart.so.13 cuda12 run.sh
 
 # ---------------------------------------------------------------------------
 # Etape 2 : image finale, sans outils de telechargement
@@ -70,7 +76,9 @@ RUN apt-get update \
 
 COPY --from=fetch /opt/miners /opt/miners
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod 0755 /usr/local/bin/entrypoint.sh \
+# ariaenergy-prl mine une carte par processus : lanceur qui en demarre un par carte visible.
+COPY scripts/ariaenergy-all.sh /opt/miners/ariaenergy/run-all.sh
+RUN chmod 0755 /usr/local/bin/entrypoint.sh /opt/miners/ariaenergy/run-all.sh \
     && mkdir -p /opt/miners/work
 
 ENV NVIDIA_VISIBLE_DEVICES=all \
@@ -78,7 +86,7 @@ ENV NVIDIA_VISIBLE_DEVICES=all \
     RESTART_DELAY=10
 
 LABEL org.opencontainers.image.title="rentingminers" \
-      org.opencontainers.image.description="GPU NVIDIA : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner ou lpminer (GPU_MINER, GPU_ARGS) ; CPU : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)"
+      org.opencontainers.image.description="GPU NVIDIA : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner, lpminer ou ARIAEnergy PRL (GPU_MINER, GPU_ARGS) ; CPU : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)"
 
 WORKDIR /opt/miners/work
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

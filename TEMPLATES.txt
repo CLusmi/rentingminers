@@ -39,6 +39,10 @@ PeakMiner 2 %, lpminer non documentés. lpminer ne mine que Quantus, sur LuckyPo
 
 --- Pearl seul (GPU) avec un autre mineur que SRBMiner ---
 
+-e GPU_MINER=ariaenergy -e GPU_ARGS="--pool POOL:PORT --wallet ADRESSE_PEARL --worker FARM"
+(ARIAEnergy PRL, 2 % : une carte par processus, l'image en lance un par carte, workers FARM-gpu0,
+FARM-gpu1… sur un rig à plusieurs cartes ; auto-test puis auto-réglage au démarrage, 1 à 2 min)
+
 -e GPU_MINER=forgeminer -e GPU_ARGS="--algorithm pearlhash --pool POOL:PORT --wallet ADRESSE_PEARL --worker FARM"
 
 -e GPU_MINER=onezerominer -e GPU_ARGS="-a pearlhash -o POOL:PORT -w ADRESSE_PEARL --worker FARM"
@@ -46,7 +50,8 @@ PeakMiner 2 %, lpminer non documentés. lpminer ne mine que Quantus, sur LuckyPo
 -e GPU_MINER=peakminer -e GPU_ARGS="--coin pearl -o POOL:PORT -u ADRESSE_PEARL -w FARM"
 
 Pilotes NVIDIA : lpminer demande un pilote 580 ou plus (CUDA 13.2), ForgeMiner 580+ pour les
-RTX 50, OneZeroMiner 528+ ; un mineur qui refuse le pilote s'arrête et se relance en boucle
+RTX 50, OneZeroMiner 528+, ARIAEnergy 525+ (deux builds, choisis seul) ; un mineur qui refuse
+le pilote s'arrête et se relance en boucle
 (ses lignes dans les logs disent pourquoi). ForgeMiner et OneZeroMiner ont aussi un « qhash » :
 c'est QubitCoin (même ticker QTC), pas Quantus.
 
@@ -82,7 +87,7 @@ docker run --gpus all -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm quantus --p
 --- Quantus sur Salad avec un autre mineur : pas de chien de garde (SRBMiner seulement) ---
 
 docker run --gpus all -e GPU_MINER=forgeminer -e GPU_ARGS="--algorithm quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker SALAD" clusmi/rentingminers:AAAA-MM-JJ-HHMM
-(SALAD_WATCHDOG renseigné avec forgeminer, onezerominer, peakminer ou lpminer = ignoré, une
+(SALAD_WATCHDOG renseigné avec forgeminer, onezerominer, peakminer, lpminer ou ariaenergy = ignoré, une
 ligne « pris en charge seulement avec GPU_MINER=srbminer » dans les logs, le mineur tourne
 sans surveillance)
 

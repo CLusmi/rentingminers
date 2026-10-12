@@ -6,9 +6,9 @@
 # par GitHub au moment ou l'auteur a publie le fichier (champ "digest" de l'API).
 # Le Dockerfile refuse tout fichier dont l'empreinte ne correspond pas.
 #
-# lpminer (LuckyPool) n'est pas sur GitHub : version, URL et empreinte sont
-# figees ici (empreinte calculee sur l'archive telechargee le 2026-10-11).
-# Nouvelle version = changer la ligne LPMINER ci-dessous.
+# lpminer (LuckyPool) et ariaenergy-prl (ARIAEnergy) ne sont pas sur GitHub :
+# version, URL et empreinte sont figees ici. Nouvelle version = changer la
+# ligne correspondante de FIXED ci-dessous.
 #
 # Necessite : gh (CLI GitHub, authentifie via GH_TOKEN) et jq.
 set -euo pipefail
@@ -23,8 +23,10 @@ MINERS=(
 )
 
 # Mineurs hors GitHub, figes : cle | version | URL | SHA-256
+# (empreintes calculees sur les archives telechargees le 2026-10-11)
 FIXED=(
   "LPMINER|0.0.3|https://eu.lproute.com/lpminerquantus/lpminerquantus-0.0.3.tar.gz|72501a42933cb52ed519ea30bf3223b531b5f5858b19a641e45e82dc5fe46b90"
+  "ARIA|v1.1.1|https://dl.ariabrain.com/pearl-dl/ariaenergy-prl-v1.1.1-linux-x86_64.tar.gz|7cbb4db0c33a9ec44afa9c88ac8fadcaf65b3145f8542813623d2937e53a9aeb"
 )
 
 for entry in "${MINERS[@]}"; do

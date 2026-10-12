@@ -2,8 +2,8 @@
 
 Image Docker pour miner sur des machines louées (vast.ai, SaladCloud, Clore.ai…) :
 
-- **GPU NVIDIA** : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner ou lpminer
-  (Pearl, Quantus… selon le mineur) ;
+- **GPU NVIDIA** : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner, lpminer ou
+  ARIAEnergy PRL (Pearl, Quantus… selon le mineur) ;
 - **CPU** : XMRig ou SRBMiner-MULTI.
 
 GPU seul, CPU seul ou les deux : **rien ne démarre sans choix explicite**. Les arguments
@@ -18,14 +18,14 @@ Le workflow GitHub (`.github/workflows/build.yml`) :
 
 1. cherche la **dernière version stable** de chaque mineur sur sa page GitHub officielle
    (`doktor83/SRBMiner-Multi`, `xmrig/xmrig`, `0xHashRaptor/ForgeMiner`,
-   `OneZeroMiner/onezerominer`, `peakminer/peakminer`) ; lpminer, le mineur Quantus de
-   LuckyPool, n'est pas sur GitHub : sa version, son URL (`eu.lproute.com`) et son
-   empreinte sont **figées** dans `scripts/resolve-versions.sh` (nouvelle version = changer
-   cette ligne) ;
+   `OneZeroMiner/onezerominer`, `peakminer/peakminer`) ; lpminer (Quantus, LuckyPool,
+   `eu.lproute.com`) et ARIAEnergy PRL (`dl.ariabrain.com`) ne sont pas sur GitHub : leur
+   version, leur URL et leur empreinte sont **figées** dans `scripts/resolve-versions.sh`
+   (nouvelle version = changer la ligne) ;
 2. télécharge l'archive Linux (ou le binaire nu pour PeakMiner) et **vérifie son
    empreinte SHA-256** (celle que GitHub a enregistrée quand l'auteur a publié le fichier,
-   ou celle figée pour lpminer) et que c'est bien un exécutable Linux : sinon, la
-   construction échoue ;
+   ou celle figée), le `SHA256SUMS` fourni dans l'archive s'il y en a un, et que c'est bien
+   un exécutable Linux : sinon, la construction échoue ;
 3. construit l'image et l'envoie sur Docker Hub sous **deux étiquettes** :
    `clusmi/rentingminers:latest` et une étiquette datée, par exemple
    `clusmi/rentingminers:2026-10-03-2145`.
@@ -55,7 +55,7 @@ relance simplement le workflow.
 
 | Variable | Valeurs | Rôle |
 |---|---|---|
-| `GPU_MINER` | `srbminer`, `forgeminer`, `onezerominer`, `peakminer` ou `lpminer` | XMRig ne mine que sur CPU |
+| `GPU_MINER` | `srbminer`, `forgeminer`, `onezerominer`, `peakminer`, `lpminer` ou `ariaenergy` | XMRig ne mine que sur CPU |
 | `GPU_ARGS` | | arguments du mineur GPU, tels quels, dans sa propre syntaxe (voir [Mineurs GPU](#mineurs-gpu)) |
 | `CPU_MINER` | `xmrig` ou `srbminer` | |
 | `CPU_ARGS` | | arguments du mineur CPU, tels quels |
@@ -92,6 +92,7 @@ dans un conteneur. **Une option déjà présente dans tes arguments n'est pas aj
 | ForgeMiner, PeakMiner | `--no-color` | logs lisibles sans terminal |
 | OneZeroMiner | rien | |
 | lpminer | variable `LP_DISABLE_HOTKEYS=1` (et ses bibliothèques `lib/`) | pas de clavier dans un conteneur |
+| ARIAEnergy PRL | lancé par `run-all.sh` : un processus par carte visible, `--worker NOM-gpuN` s'il y a plusieurs cartes | le mineur ne mine qu'une carte par processus |
 | SRBMiner CPU | `--disable-gpu`, `--disable-numa-binding`, `--log-file` | CPU seulement ; voir « machines à plusieurs processeurs » |
 | XMRig | `--randomx-no-numa`, `--no-color` | idem ; logs lisibles |
 
@@ -119,6 +120,7 @@ Pearl `prl.kryptex.network:7048`, HeroMiners Pearl `de.pearl.herominers.com:1200
 | `onezerominer` | OneZeroMiner | `pearlhash` (1 %), `quantus` (2 %) | `-a quantus -o POOL:PORT -w ADRESSE --worker NOM` |
 | `peakminer` | PeakMiner | `pearl` (2 %), `quantus` (2 %) | `--coin quantus -o POOL:PORT -u ADRESSE -w NOM` (ou `-u ADRESSE.NOM`) |
 | `lpminer` | lpminerquantus (LuckyPool) | Quantus seulement, sur LuckyPool ; frais non documentés | `--algo quantus --pool POOL:PORT --wallet ADRESSE --worker NOM` |
+| `ariaenergy` | ARIAEnergy PRL | Pearl seulement (2 % : 120 s toutes les 100 min) | `--pool POOL:PORT --wallet ADRESSE --worker NOM` |
 
 Pour Pearl avec ForgeMiner / OneZeroMiner : `pearlhash` à la place de `quantus` ; avec
 PeakMiner : `--coin pearl`. Attention, ForgeMiner et OneZeroMiner ont aussi un `qhash` :
@@ -127,7 +129,16 @@ c'est **QubitCoin**, qui porte le même ticker QTC, pas Quantus.
 Pilotes NVIDIA demandés par les mineurs (sur Salad, la machine attribuée a le pilote
 qu'elle a ; un mineur qui le refuse s'arrête et se relance en boucle, lis ses lignes dans
 les logs) : lpminer **580 ou plus** (CUDA 13.2) ; ForgeMiner 580+ pour les RTX 50 ;
-OneZeroMiner 528+ ; PeakMiner et SRBMiner embarquent leur runtime.
+OneZeroMiner 528+ ; PeakMiner et SRBMiner embarquent leur runtime ; ARIAEnergy PRL
+embarque deux builds (CUDA 13 à partir du pilote 580, CUDA 12 pour 525 à 579) et choisit
+seul, RTX 3000 ou plus récente.
+
+**ARIAEnergy PRL mine une carte par processus.** L'image s'en charge : avec une seule carte
+visible (Salad), le mineur est lancé tel quel ; avec plusieurs (rig vast.ai), un processus
+par carte, le worker suffixé `-gpu0`, `-gpu1`… (la pool montre chaque carte), chaque ligne
+de log préfixée `[gpuN]`. Si un processus s'arrête, les autres sont arrêtés et l'ensemble
+est relancé. Au démarrage, le mineur fait un auto-test (une preuve complète vérifiée) puis
+un auto-réglage de ses kernels : compte une à deux minutes avant le premier hashrate.
 
 Le chien de garde Salad lit le log de SRBMiner : avec un autre mineur GPU, il est ignoré
 (ligne `pris en charge seulement avec GPU_MINER=srbminer` dans les logs) et le mineur
@@ -168,6 +179,13 @@ GPU_ARGS=--coin quantus -o pl.lproute.com:5660 -u ADRESSE_QUANTUS -w FARM
 ```
 GPU_MINER=lpminer
 GPU_ARGS=--algo quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker FARM
+```
+
+**Pearl (GPU, ARIAEnergy PRL)** :
+
+```
+GPU_MINER=ariaenergy
+GPU_ARGS=--pool de.pearl.herominers.com:1200 --wallet ADRESSE_PEARL --worker FARM
 ```
 
 **Pearl (GPU) + Monero (CPU, XMRig)** :
@@ -272,7 +290,8 @@ tous les replicas.
 - **Frais** : chaque mineur prélève des frais de développeur fixés par son auteur
   (XMRig : 1 % ; SRBMiner : selon l'algorithme, 2 % pour pearlhash, 0,85 % pour
   randomdrgx ; ForgeMiner 2 % ; OneZeroMiner 1 % pearlhash / 2 % quantus ; PeakMiner 2 % ;
-  lpminer : non documentés). Compare les mineurs sur le hashrate vu par la pool.
+  ARIAEnergy PRL 2 % ; lpminer : non documentés). Compare les mineurs sur le hashrate vu
+  par la pool.
 - **Mineur CPU en conteneur** : les messages sur les « huge pages » et les registres
   « MSR » sont normaux. Ces optimisations demandent des droits que seul l'hôte a ; sans
   elles, RandomX perd environ 10 à 20 %.
@@ -299,7 +318,7 @@ tous les replicas.
   sur une version trop ancienne, pool injoignable, pilote NVIDIA trop ancien pour lpminer
   ou ForgeMiner…).
 - **`GPU_MINER=... inconnu`** : valeurs possibles `srbminer`, `forgeminer`, `onezerominer`,
-  `peakminer`, `lpminer`.
+  `peakminer`, `lpminer`, `ariaenergy`.
 - **`pris en charge seulement avec GPU_MINER=srbminer`** : le chien de garde Salad est
   renseigné avec un autre mineur GPU ; il est ignoré, le mineur tourne sans surveillance.
 - **Hashrate CPU très bas** : cherche `slow mode` (XMRig) dans les logs, et vérifie que la
