@@ -49,9 +49,14 @@ FARM-gpu1… sur un rig à plusieurs cartes ; auto-test puis auto-réglage au d�
 
 -e GPU_MINER=peakminer -e GPU_ARGS="--coin pearl -o POOL:PORT -u ADRESSE_PEARL -w FARM"
 
+-e GPU_MINER=wildrig -e GPU_ARGS="-a pearlhash -o POOL:PORT -u ADRESSE_PEARL.FARM"
+(WildRig Multi, 0 % sur pearlhash d'après son README : OpenCL seulement, donc vast.ai et hôtes
+Linux, PAS SaladCloud ; worker dans le wallet ; arrêt du minage à 85 °C par défaut,
+--gpu-temp-limit N pour changer)
+
 Pilotes NVIDIA : lpminer demande un pilote 580 ou plus (CUDA 13.2), ForgeMiner 580+ pour les
-RTX 50, OneZeroMiner 528+, ARIAEnergy 525+ (deux builds, choisis seul) ; un mineur qui refuse
-le pilote s'arrête et se relance en boucle
+RTX 50, OneZeroMiner 528+, ARIAEnergy 525+ (deux builds, choisis seul), WildRig 450.80+ ; un
+mineur qui refuse le pilote s'arrête et se relance en boucle
 (ses lignes dans les logs disent pourquoi). ForgeMiner et OneZeroMiner ont aussi un « qhash » :
 c'est QubitCoin (même ticker QTC), pas Quantus.
 
@@ -98,6 +103,10 @@ docker run --gpus all -e GPU_MINER=forgeminer -e GPU_ARGS="--algorithm quantus -
 (pour ForgeMiner, OneZeroMiner, PeakMiner et lpminer, le filtre de lecture est générique tant que
 leurs vraies lignes n'ont pas été vues : commence en observe et vérifie la ligne « Lecture du
 hashrate (...) » dans les logs ; SALAD_HASHRATE_MATCH / SALAD_HASHRATE_IGNORE pour corriger)
+
+Pas de WildRig sur Salad : il ne parle que OpenCL, et les conteneurs Salad tournent dans WSL2,
+où le pilote NVIDIA n'offre pas d'OpenCL. Il ne verrait aucune carte et le groupe redémarrerait
+en boucle. WildRig = vast.ai (et autres hôtes Linux).
 
 --- Dual : Pearl (GPU) + Monero (CPU, XMRig) sur Salad ---
 
