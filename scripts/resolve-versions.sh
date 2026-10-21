@@ -20,6 +20,7 @@ MINERS=(
   "FORGE|0xHashRaptor/ForgeMiner|^ForgeMiner-[0-9.]+-linux\\.tar\\.gz$"
   "OZM|OneZeroMiner/onezerominer|^onezerominer-linux-[0-9.]+\\.tar\\.gz$"
   "PEAK|peakminer/peakminer|^peakminer-[0-9.]+-linux-x86_64$"
+  "WILD|andru-kun/wildrig-multi|^wildrig-multi-linux-[0-9.]+\\.tar\\.gz$"
 )
 
 # Mineurs hors GitHub, figes : cle | version | URL | SHA-256

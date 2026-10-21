@@ -1,6 +1,8 @@
 # Image de minage pour GPU loues (vast.ai, SaladCloud, Clore.ai...) :
-#   - GPU NVIDIA : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner, lpminer ou
-#                  ARIAEnergy PRL (GPU_MINER, GPU_ARGS)
+#   - GPU NVIDIA : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner, lpminer,
+#                  ARIAEnergy PRL ou WildRig Multi (GPU_MINER, GPU_ARGS). WildRig ne
+#                  parle que OpenCL : vast.ai et hotes Linux, pas SaladCloud (WSL2
+#                  n'a pas d'OpenCL NVIDIA).
 #   - CPU        : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)
 # Un cote ne demarre que si son mineur ET ses arguments sont renseignes.
 # Sur SaladCloud, un chien de garde facultatif (SALAD_WATCHDOG) demande une
@@ -43,6 +45,9 @@ ARG LPMINER_SHA256
 ARG ARIA_VERSION
 ARG ARIA_URL
 ARG ARIA_SHA256
+ARG WILD_VERSION
+ARG WILD_URL
+ARG WILD_SHA256
 
 # lpminer : son dossier lib/ (libstdc++ fourni par l'auteur) est garde a cote du binaire.
 # ariaenergy-prl : son runtime CUDA 13, son second build cuda12/ (pilotes 525-579) et son
@@ -56,7 +61,8 @@ RUN chmod +x /usr/local/bin/fetch-miner \
     && fetch-miner onezerominer "$OZM_VERSION"     "$OZM_URL"     "$OZM_SHA256"     onezerominer \
     && fetch-miner peakminer    "$PEAK_VERSION"    "$PEAK_URL"    "$PEAK_SHA256"    peakminer \
     && fetch-miner lpminer      "$LPMINER_VERSION" "$LPMINER_URL" "$LPMINER_SHA256" lpminer lib \
-    && fetch-miner ariaenergy   "$ARIA_VERSION"    "$ARIA_URL"    "$ARIA_SHA256"    ariaenergy-prl libcudart.so.13 cuda12 run.sh
+    && fetch-miner ariaenergy   "$ARIA_VERSION"    "$ARIA_URL"    "$ARIA_SHA256"    ariaenergy-prl libcudart.so.13 cuda12 run.sh \
+    && fetch-miner wildrig      "$WILD_VERSION"    "$WILD_URL"    "$WILD_SHA256"    wildrig-multi
 
 # ---------------------------------------------------------------------------
 # Etape 2 : image finale, sans outils de telechargement
@@ -65,7 +71,8 @@ FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 # ca-certificates : connexions TLS aux pools.
-# ocl-icd-libopencl1 : chargeur OpenCL, que SRBMiner ouvre au demarrage.
+# ocl-icd-libopencl1 : chargeur OpenCL, que SRBMiner ouvre au demarrage et par
+# lequel WildRig voit les cartes.
 # wget : demande par SRBMiner (il s'arrete sans lui si sa connexion directe a
 # ses serveurs de frais echoue).
 # Le pilote NVIDIA (libcuda, NVML) n'est PAS dans l'image : l'hote l'injecte
@@ -78,15 +85,30 @@ COPY --from=fetch /opt/miners /opt/miners
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 # ariaenergy-prl mine une carte par processus : lanceur qui en demarre un par carte visible.
 COPY scripts/ariaenergy-all.sh /opt/miners/ariaenergy/run-all.sh
+# WildRig ne parle que OpenCL. Le chargeur (ocl-icd) trouve les pilotes grace aux
+# fichiers de /etc/OpenCL/vendors ; l'hote injecte libnvidia-opencl.so.1 dans le
+# conteneur (capacite "compute") mais pas ce fichier de declaration : on le cree ici.
+# Sans pilote OpenCL NVIDIA sur l'hote (SaladCloud : WSL2), le chargeur ignore la
+# ligne et les autres mineurs (CUDA) ne voient aucune difference.
 RUN chmod 0755 /usr/local/bin/entrypoint.sh /opt/miners/ariaenergy/run-all.sh \
-    && mkdir -p /opt/miners/work
+    && mkdir -p /opt/miners/work /etc/OpenCL/vendors \
+    && echo "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia.icd
+
+# Verification : les bibliotheques partagees que WildRig charge au demarrage sont
+# toutes dans l'image (sinon il s'arreterait aussitot, code 127, en boucle).
+# libOpenCL.so.1 vient de ocl-icd-libopencl1 ; la bibliotheque NVIDIA elle-meme est
+# ouverte plus tard par le chargeur, elle n'apparait pas ici.
+RUN if ldd /opt/miners/wildrig/wildrig-multi 2>&1 | grep -F 'not found'; then \
+      echo "ERREUR: bibliotheque manquante pour WildRig (a ajouter dans apt-get install ci-dessus)." >&2; \
+      exit 1; \
+    fi
 
 ENV NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
     RESTART_DELAY=10
 
 LABEL org.opencontainers.image.title="rentingminers" \
-      org.opencontainers.image.description="GPU NVIDIA : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner, lpminer ou ARIAEnergy PRL (GPU_MINER, GPU_ARGS) ; CPU : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)"
+      org.opencontainers.image.description="GPU NVIDIA : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner, lpminer, ARIAEnergy PRL ou WildRig Multi (GPU_MINER, GPU_ARGS) ; CPU : XMRig ou SRBMiner-MULTI (CPU_MINER, CPU_ARGS)"
 
 WORKDIR /opt/miners/work
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

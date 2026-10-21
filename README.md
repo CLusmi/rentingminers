@@ -2,8 +2,9 @@
 
 Image Docker pour miner sur des machines louées (vast.ai, SaladCloud, Clore.ai…) :
 
-- **GPU NVIDIA** : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner, lpminer ou
-  ARIAEnergy PRL (Pearl, Quantus… selon le mineur) ;
+- **GPU NVIDIA** : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner, lpminer, ARIAEnergy
+  PRL ou WildRig Multi (Pearl, Quantus… selon le mineur ; WildRig : vast.ai et hôtes Linux
+  seulement, voir plus bas) ;
 - **CPU** : XMRig ou SRBMiner-MULTI.
 
 GPU seul, CPU seul ou les deux : **rien ne démarre sans choix explicite**. Les arguments
@@ -18,7 +19,8 @@ Le workflow GitHub (`.github/workflows/build.yml`) :
 
 1. cherche la **dernière version stable** de chaque mineur sur sa page GitHub officielle
    (`doktor83/SRBMiner-Multi`, `xmrig/xmrig`, `0xHashRaptor/ForgeMiner`,
-   `OneZeroMiner/onezerominer`, `peakminer/peakminer`) ; lpminer (Quantus, LuckyPool,
+   `OneZeroMiner/onezerominer`, `peakminer/peakminer`, `andru-kun/wildrig-multi`) ;
+   lpminer (Quantus, LuckyPool,
    `eu.lproute.com`) et ARIAEnergy PRL (`dl.ariabrain.com`) ne sont pas sur GitHub : leur
    version, leur URL et leur empreinte sont **figées** dans `scripts/resolve-versions.sh`
    (nouvelle version = changer la ligne) ;
@@ -55,7 +57,7 @@ relance simplement le workflow.
 
 | Variable | Valeurs | Rôle |
 |---|---|---|
-| `GPU_MINER` | `srbminer`, `forgeminer`, `onezerominer`, `peakminer`, `lpminer` ou `ariaenergy` | XMRig ne mine que sur CPU |
+| `GPU_MINER` | `srbminer`, `forgeminer`, `onezerominer`, `peakminer`, `lpminer`, `ariaenergy` ou `wildrig` | XMRig ne mine que sur CPU |
 | `GPU_ARGS` | | arguments du mineur GPU, tels quels, dans sa propre syntaxe (voir [Mineurs GPU](#mineurs-gpu)) |
 | `CPU_MINER` | `xmrig` ou `srbminer` | |
 | `CPU_ARGS` | | arguments du mineur CPU, tels quels |
@@ -93,6 +95,7 @@ dans un conteneur. **Une option déjà présente dans tes arguments n'est pas aj
 | OneZeroMiner | rien | |
 | lpminer | variable `LP_DISABLE_HOTKEYS=1` (et ses bibliothèques `lib/`) | pas de clavier dans un conteneur |
 | ARIAEnergy PRL | lancé par `run-all.sh` : un processus par carte visible, `--worker NOM-gpuN` s'il y a plusieurs cartes | le mineur ne mine qu'une carte par processus |
+| WildRig Multi | `--no-color`, `--opencl-platforms nvidia`, `--print-time 30` | logs lisibles ; cartes NVIDIA seulement ; une ligne de hashrate toutes les 30 s |
 | tous les mineurs GPU | leur sortie est gardée dans un fichier (`gpu-<mineur>.log`, recopié dans les logs) | le hashrate y est lu (chien de garde, ligne `GPU0 … H/s` pour les outils) |
 | SRBMiner CPU | `--disable-gpu`, `--disable-numa-binding`, `--log-file` | CPU seulement ; voir « machines à plusieurs processeurs » |
 | XMRig | `--randomx-no-numa`, `--no-color` | idem ; logs lisibles |
@@ -122,6 +125,7 @@ Pearl `prl.kryptex.network:7048`, HeroMiners Pearl `de.pearl.herominers.com:1200
 | `peakminer` | PeakMiner | `pearl` (2 %), `quantus` (2 %) | `--coin quantus -o POOL:PORT -u ADRESSE -w NOM` (ou `-u ADRESSE.NOM`) |
 | `lpminer` | lpminerquantus (LuckyPool) | Quantus seulement, sur LuckyPool ; frais non documentés | `--algo quantus --pool POOL:PORT --wallet ADRESSE --worker NOM` |
 | `ariaenergy` | ARIAEnergy PRL | Pearl seulement (2 % : 120 s toutes les 100 min) | `--pool POOL:PORT --wallet ADRESSE --worker NOM` |
+| `wildrig` | WildRig Multi | Pearl `pearlhash` (0 %, voir plus bas) ; pas de Quantus (son `qhash` est QubitCoin) | `-a pearlhash -o POOL:PORT -u ADRESSE.NOM` (worker dans le wallet) |
 
 Pour Pearl avec ForgeMiner / OneZeroMiner : `pearlhash` à la place de `quantus` ; avec
 PeakMiner : `--coin pearl`. Attention, ForgeMiner et OneZeroMiner ont aussi un `qhash` :
@@ -132,7 +136,31 @@ qu'elle a ; un mineur qui le refuse s'arrête et se relance en boucle, lis ses l
 les logs) : lpminer **580 ou plus** (CUDA 13.2) ; ForgeMiner 580+ pour les RTX 50 ;
 OneZeroMiner 528+ ; PeakMiner et SRBMiner embarquent leur runtime ; ARIAEnergy PRL
 embarque deux builds (CUDA 13 à partir du pilote 580, CUDA 12 pour 525 à 579) et choisit
-seul, RTX 3000 ou plus récente.
+seul, RTX 3000 ou plus récente ; WildRig 450.80 ou plus.
+
+**WildRig Multi ne parle que OpenCL, jamais CUDA : vast.ai et hôtes Linux seulement.** Sur un
+hôte Linux, le runtime NVIDIA injecte le pilote OpenCL de la carte dans le conteneur et
+l'image le déclare au chargeur OpenCL (`/etc/OpenCL/vendors/nvidia.icd`) : WildRig voit les
+cartes. Sur SaladCloud, les conteneurs tournent dans WSL2, où le pilote NVIDIA n'offre pas
+d'OpenCL : WildRig ne trouve aucune carte, s'arrête, et l'image le relance en boucle. Ne
+l'utilise pas sur Salad. À savoir aussi :
+
+- **Frais** : pearlhash n'est dans aucune tranche de frais de son README, donc 0 % ; ses
+  notes de version répètent pourtant « dev-fee is 0% with pearlhash.xyz pool » : lis la
+  ligne de frais qu'il affiche au démarrage avec ta pool, et compare sur le hashrate vu par
+  la pool.
+- **Worker** : `-w` ne sert qu'aux algorithmes progpow ; pour pearlhash, il va dans le
+  wallet, `-u ADRESSE.NOM` ou `ADRESSE/NOM` selon la pool. TLS : `stratum+ssl://POOL:PORT`
+  d'après les guides des pools, à tester.
+- **Température** : par défaut WildRig **arrête de miner à 85 °C** et ne reprend qu'à 60 °C
+  (`--gpu-temp-limit`, `--gpu-temp-resume`) ; sur une carte louée qui chauffe, ça fait des
+  trous dans le hashrate. Ajuste ces options dans tes arguments, l'image ne les touche pas.
+- `--pearlhash-kernel 2` consomme moins pour un peu moins de hashrate : sans intérêt sur une
+  location payée à l'heure. Son `--watchdog` reste coupé, l'image relance déjà le mineur.
+- Le contenu de son archive et le format exact de ses lignes n'ont pas encore été vus en
+  vrai : la construction vérifie que le binaire est seul et que ses bibliothèques sont là ;
+  sa ligne de hashrate est lue par le filtre générique (vérifie `Lecture du hashrate
+  (wildrig)` dans les logs).
 
 **ARIAEnergy PRL mine une carte par processus.** L'image s'en charge : avec une seule carte
 visible (Salad), le mineur est lancé tel quel ; avec plusieurs (rig vast.ai), un processus
@@ -154,7 +182,7 @@ vérifier que la bonne ligne est prise.
 | Mineur | Ligne lue (filtre par défaut) |
 |---|---|
 | ARIAEnergy PRL | `[stats] 113.75 TH/s \| accepted 33 rejected 0 dropped 1 \| …` (filtre `^\[stats\]`) |
-| ForgeMiner, OneZeroMiner, PeakMiner, lpminer | dernière ligne contenant un hashrate, hors lignes `network`, `difficulty`, `diff=`, `pool hashrate`, `reward` (à vérifier en mode `observe` sur leurs vraies lignes) |
+| ForgeMiner, OneZeroMiner, PeakMiner, lpminer, WildRig | dernière ligne contenant un hashrate, hors lignes `network`, `difficulty`, `diff=`, `pool hashrate`, `reward` (à vérifier en mode `observe` sur leurs vraies lignes ; WildRig : sur vast.ai, dans la ligne `Lecture du hashrate`) |
 
 Deux variables pour corriger un filtre sans reconstruire l'image : `SALAD_HASHRATE_MATCH`
 (regex qu'une ligne doit contenir, ex. `^\[stats\]` ; `.` = toutes) et
@@ -204,6 +232,13 @@ GPU_MINER=ariaenergy
 GPU_ARGS=--pool de.pearl.herominers.com:1200 --wallet ADRESSE_PEARL --worker FARM
 ```
 
+**Pearl (GPU, WildRig Multi, vast.ai seulement)** :
+
+```
+GPU_MINER=wildrig
+GPU_ARGS=-a pearlhash -o de.pearl.herominers.com:1200 -u ADRESSE_PEARL.FARM
+```
+
 **Pearl (GPU) + Monero (CPU, XMRig)** :
 
 ```
@@ -241,7 +276,7 @@ et Blackwell). Une image construite avec une version plus ancienne refuse l'opti
 SRBMiner ne démarre pas : mets d'abord l'image à jour, puis l'option.
 
 Le nom du worker suit le format attendu par la pool : `--worker` (SRBMiner), `wallet.worker`
-ou `wallet/worker` (Kryptex pour Monero). Sans worker, ça mine quand même.
+ou `wallet/worker` (WildRig, Kryptex pour Monero). Sans worker, ça mine quand même.
 
 Quelques algorithmes CPU de SRBMiner (liste complète sur sa page GitHub) : `randomdrgx`
 (DragonX), `verushash` (Verus), `randomepic` (Epic Cash), `randomx` (Monero).
@@ -312,8 +347,8 @@ tous les replicas.
 - **Frais** : chaque mineur prélève des frais de développeur fixés par son auteur
   (XMRig : 1 % ; SRBMiner : selon l'algorithme, 2 % pour pearlhash, 0,85 % pour
   randomdrgx ; ForgeMiner 2 % ; OneZeroMiner 1 % pearlhash / 2 % quantus ; PeakMiner 2 % ;
-  ARIAEnergy PRL 2 % ; lpminer : non documentés). Compare les mineurs sur le hashrate vu
-  par la pool.
+  ARIAEnergy PRL 2 % ; WildRig 0 % pearlhash d'après son README, voir « Mineurs GPU » ;
+  lpminer : non documentés). Compare les mineurs sur le hashrate vu par la pool.
 - **Mineur CPU en conteneur** : les messages sur les « huge pages » et les registres
   « MSR » sont normaux. Ces optimisations demandent des droits que seul l'hôte a ; sans
   elles, RandomX perd environ 10 à 20 %.
@@ -340,7 +375,12 @@ tous les replicas.
   sur une version trop ancienne, pool injoignable, pilote NVIDIA trop ancien pour lpminer
   ou ForgeMiner…).
 - **`GPU_MINER=... inconnu`** : valeurs possibles `srbminer`, `forgeminer`, `onezerominer`,
-  `peakminer`, `lpminer`, `ariaenergy`.
+  `peakminer`, `lpminer`, `ariaenergy`, `wildrig`.
+- **WildRig s'arrête aussitôt en disant qu'il ne trouve aucune carte ou aucune plateforme
+  OpenCL** : l'hôte n'expose pas d'OpenCL NVIDIA. Sur SaladCloud (WSL2) c'est normal, WildRig
+  n'y marche pas : prends un autre mineur. Sur vast.ai, vérifie que `nvidia-smi` marche dans
+  le conteneur (runtime NVIDIA) et que le fichier `/etc/OpenCL/vendors/nvidia.icd` de l'image
+  est bien là.
 - **Pas de ligne `GPU0 … H/s` avec un mineur autre que SRBMiner** (menu 2 de
   Salad-Switch-Log vide, verdicts `plus aucune statistique`) : la ligne de hashrate du mineur
   n'est pas reconnue par le filtre. Regarde ses lignes dans les logs et règle
