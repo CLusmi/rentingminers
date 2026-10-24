@@ -25,7 +25,7 @@ case par variable, avec la valeur SANS guillemets.
 --- Quantus seul (GPU), un mineur au choix ---
 Pools : LuckyPool pl.lproute.com:5660 (ou eu / us-east / sg… .lproute.com, même port),
 Kryptex qtc.kryptex.network:7049. Frais : SRBMiner et ForgeMiner 2 %, OneZeroMiner 2 %,
-PeakMiner 2 %, lpminer non documentés. lpminer ne mine que Quantus, sur LuckyPool.
+PeakMiner 2 %, FearMiner 1,5 %, lpminer non documentés. lpminer ne mine que Quantus, sur LuckyPool.
 
 -e GPU_MINER=srbminer -e GPU_ARGS="--algorithm quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker FARM"
 
@@ -36,6 +36,10 @@ PeakMiner 2 %, lpminer non documentés. lpminer ne mine que Quantus, sur LuckyPo
 -e GPU_MINER=peakminer -e GPU_ARGS="--coin quantus -o pl.lproute.com:5660 -u ADRESSE_QUANTUS -w FARM"
 
 -e GPU_MINER=lpminer -e GPU_ARGS="--algo quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker FARM"
+
+-e GPU_MINER=fearminer -e GPU_ARGS="-a quantus -o pl.lproute.com:5660 -u ADRESSE_QUANTUS -w FARM"
+(FearMiner, 1,5 % : moteurs signés par l'éditeur, mis à jour tout seuls en cours de route ;
+télémétrie anonyme toutes les 15 min, ajoute --no-telemetry pour la couper ; pilote 550+)
 
 --- Pearl seul (GPU) avec un autre mineur que SRBMiner ---
 
@@ -54,10 +58,16 @@ FARM-gpu1… sur un rig à plusieurs cartes ; auto-test puis auto-réglage au d�
 Linux, PAS SaladCloud ; worker dans le wallet ; arrêt du minage à 85 °C par défaut,
 --gpu-temp-limit N pour changer)
 
+-e GPU_MINER=fearminer -e GPU_ARGS="-a pearl -o POOL:PORT -u ADRESSE_PEARL -w FARM"
+(FearMiner, 1,5 % : RTX 30, 40 et 50 seulement, pilote 550+ (570 pour les RTX 50) ;
+stratum+ssl://POOL:PORT pour un port TLS ; moteurs signés mis à jour tout seuls ;
+--no-telemetry pour couper sa télémétrie anonyme)
+
 Pilotes NVIDIA : lpminer demande un pilote 580 ou plus (CUDA 13.2), ForgeMiner 580+ pour les
-RTX 50, OneZeroMiner 528+, ARIAEnergy 525+ (deux builds, choisis seul), WildRig 450.80+ ; un
-mineur qui refuse le pilote s'arrête et se relance en boucle
-(ses lignes dans les logs disent pourquoi). ForgeMiner et OneZeroMiner ont aussi un « qhash » :
+RTX 50, OneZeroMiner 528+, ARIAEnergy 525+ (deux builds, choisis seul), WildRig 450.80+,
+FearMiner 550+ (570 pour les RTX 50) ; un mineur qui refuse le pilote s'arrête et se relance
+en boucle (ses lignes dans les logs disent pourquoi), sauf FearMiner, qui écarte la carte et
+tourne à vide (lignes E308, E310). ForgeMiner et OneZeroMiner ont aussi un « qhash » :
 c'est QubitCoin (même ticker QTC), pas Quantus.
 
 Règle : un côté démarre seulement si son MINER et ses ARGS sont renseignés tous les deux.
@@ -100,9 +110,11 @@ en observe, avant de passer en reallocate ; ARIAEnergy met 1 à 2 min avant sa p
 --- Quantus sur Salad avec un autre mineur que SRBMiner, mêmes variables de chien de garde ---
 
 docker run --gpus all -e GPU_MINER=forgeminer -e GPU_ARGS="--algorithm quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker SALAD" -e SALAD_WATCHDOG=observe -e SALAD_MIN_HASHRATE=5090=1100M -e SALAD_GRACE=180 -e SALAD_BAD_READINGS=3 -e SALAD_ZERO_READINGS=2 -e SALAD_STALE_MINUTES=2 clusmi/rentingminers:AAAA-MM-JJ-HHMM
-(pour ForgeMiner, OneZeroMiner, PeakMiner et lpminer, le filtre de lecture est générique tant que
-leurs vraies lignes n'ont pas été vues : commence en observe et vérifie la ligne « Lecture du
-hashrate (...) » dans les logs ; SALAD_HASHRATE_MATCH / SALAD_HASHRATE_IGNORE pour corriger)
+(pour ForgeMiner, OneZeroMiner, PeakMiner, lpminer et FearMiner, le filtre de lecture est
+générique tant que leurs vraies lignes n'ont pas été vues : commence en observe et vérifie la
+ligne « Lecture du hashrate (...) » dans les logs ; SALAD_HASHRATE_MATCH / SALAD_HASHRATE_IGNORE
+pour corriger. FearMiner marche sur Salad (CUDA), pilote 550+ ; une carte qu'il écarte le laisse
+tourner à vide, que les règles « lectures à 0 » et « plus de statistiques » rattrapent)
 
 Pas de WildRig sur Salad : il ne parle que OpenCL, et les conteneurs Salad tournent dans WSL2,
 où le pilote NVIDIA n'offre pas d'OpenCL. Il ne verrait aucune carte et le groupe redémarrerait

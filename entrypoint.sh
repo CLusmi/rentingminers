@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Lance un mineur sur les GPU (SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner,
-# lpminer, ARIAEnergy PRL ou WildRig Multi) et/ou un mineur sur le CPU (XMRig ou
-# SRBMiner-MULTI). Les arguments sont passes aux mineurs tels quels.
+# lpminer, ARIAEnergy PRL, WildRig Multi ou FearMiner) et/ou un mineur sur le CPU (XMRig
+# ou SRBMiner-MULTI). Les arguments sont passes aux mineurs tels quels.
 #
 # Rien n'est lance par defaut : un cote demarre seulement si SON mineur ET SES
 # arguments sont renseignes. GPU seul, CPU seul ou les deux, au choix.
 #
 # Variables :
-#   GPU_MINER      srbminer | forgeminer | onezerominer | peakminer | lpminer | ariaenergy | wildrig
+#   GPU_MINER      srbminer | forgeminer | onezerominer | peakminer | lpminer | ariaenergy | wildrig | fearminer
 #                  (XMRig ne mine que sur CPU ; wildrig : OpenCL seulement, donc vast.ai et
 #                  hotes Linux, pas SaladCloud)
 #   GPU_ARGS       arguments du mineur GPU, dans sa propre syntaxe :
@@ -20,6 +20,9 @@
 #                  ariaenergy   --pool POOL:PORT --wallet ADRESSE --worker NOM  (Pearl seulement ;
 #                               une carte par processus : l'image en lance un par carte visible)
 #                  wildrig      -a pearlhash -o POOL:PORT -u ADRESSE.NOM  (Pearl ; worker dans le wallet)
+#                  fearminer    -a pearl|quantus -o stratum+ssl://POOL:PORT -u ADRESSE -w NOM
+#                               (POOL:PORT nu ou stratum+tcp:// pour un port en clair ;
+#                               moteurs signes mis a jour tout seuls ; --no-telemetry au choix)
 #   CPU_MINER      xmrig | srbminer
 #   CPU_ARGS       arguments du mineur CPU
 #                  ex. --coin monero -o xmr.kryptex.network:7029 -u ADRESSE/RENT -t 184 -k
@@ -63,6 +66,7 @@
 #   ariaenergy   : rien ; lance par /opt/miners/ariaenergy/run-all.sh (un processus par carte,
 #                  worker suffixe -gpuN s'il y a plusieurs cartes)
 #   WildRig      : --no-color --opencl-platforms nvidia --print-time 30
+#   FearMiner    : --allow-root --no-tui --no-color (il refuse de tourner en root sans l'option)
 #
 # Avec des arguments (docker run image --help), SRBMiner est lance directement
 # avec ces arguments ; une commande (bash, nvidia-smi) est executee.
@@ -77,7 +81,8 @@ peak="$MINERS_DIR/peakminer/peakminer"
 lpminer="$MINERS_DIR/lpminer/lpminer"
 aria="$MINERS_DIR/ariaenergy/run-all.sh"
 wild="$MINERS_DIR/wildrig/wildrig-multi"
-GPU_MINERS="srbminer, forgeminer, onezerominer, peakminer, lpminer, ariaenergy, wildrig"
+fear="$MINERS_DIR/fearminer/fearminer"
+GPU_MINERS="srbminer, forgeminer, onezerominer, peakminer, lpminer, ariaenergy, wildrig, fearminer"
 
 log() { echo "[rentingminers] $*"; }
 die() { echo "[rentingminers] ERREUR: $*" >&2; exit 1; }
@@ -281,7 +286,7 @@ gpu_on=0
 cpu_on=0
 if [[ -n "${GPU_MINER:-}" && -n "${GPU_ARGS:-}" ]]; then gpu_on=1
 elif [[ -n "${GPU_MINER:-}" ]]; then die "GPU_MINER est renseigne mais GPU_ARGS manque (ou vide)."
-elif [[ -n "${GPU_ARGS:-}" ]]; then die "GPU_ARGS est renseigne mais GPU_MINER manque (GPU_MINER=srbminer, forgeminer, onezerominer, peakminer, lpminer, ariaenergy ou wildrig)."
+elif [[ -n "${GPU_ARGS:-}" ]]; then die "GPU_ARGS est renseigne mais GPU_MINER manque (GPU_MINER=srbminer, forgeminer, onezerominer, peakminer, lpminer, ariaenergy, wildrig ou fearminer)."
 fi
 if [[ -n "${CPU_MINER:-}" && -n "${CPU_ARGS:-}" ]]; then cpu_on=1
 elif [[ -n "${CPU_MINER:-}" ]]; then die "CPU_MINER est renseigne mais CPU_ARGS manque (ou vide)."
@@ -291,7 +296,7 @@ if [[ $gpu_on -eq 0 && $cpu_on -eq 0 ]]; then
   die "rien a miner : renseigne GPU_MINER + GPU_ARGS (GPU), CPU_MINER + CPU_ARGS (CPU), ou les deux."
 fi
 
-# --- GPU : SRBMiner, ForgeMiner, OneZeroMiner, PeakMiner, lpminer, ARIAEnergy ou WildRig ---
+# --- GPU : SRBMiner, ForgeMiner, OneZeroMiner, PeakMiner, lpminer, ARIAEnergy, WildRig ou FearMiner ---
 # SRBMiner passe par son fichier de log (recopie dans les logs du conteneur plus bas,
 # et lu par le chien de garde Salad). Les autres ecrivent directement dans les logs
 # du conteneur, avec leurs arguments tels quels.
@@ -308,6 +313,7 @@ if [[ $gpu_on -eq 1 ]]; then
     lp|lpminer|lpminerquantus)    gpu_miner=lpminer ;;
     aria|ariaenergy|ariaenergy-prl|ariaenergyprl) gpu_miner=ariaenergy ;;
     wild|wildrig|wildrig-multi)   gpu_miner=wildrig ;;
+    fear|fearminer)               gpu_miner=fearminer ;;
     xmrig) die "GPU_MINER=xmrig : XMRig ne mine que sur CPU. Pour le GPU : ${GPU_MINERS}." ;;
     *) die "GPU_MINER=${GPU_MINER} inconnu. Valeurs possibles : ${GPU_MINERS}." ;;
   esac
@@ -363,6 +369,18 @@ if [[ $gpu_on -eq 1 ]]; then
       has_opt --opencl-platforms "${gpu_user[@]}" || gpu_cmd+=(--opencl-platforms nvidia)
       has_opt --print-time "${gpu_user[@]}"       || gpu_cmd+=(--print-time 30)
       ;;
+    fearminer)
+      [[ -x "$fear" ]] || die "binaire introuvable : $fear"
+      # FearMiner refuse de tourner en root sans --allow-root (l'image tourne en root ; le
+      # paquet HiveOS de l'editeur passe la meme option). --no-tui --no-color : journal brut.
+      # Ses moteurs (un par algorithme, signes par l'editeur) sont dans engines/ a cote du
+      # binaire et se mettent a jour tout seuls ; la telemetrie est laissee aux arguments
+      # (--no-telemetry pour la couper).
+      gpu_cmd=("$fear")
+      has_opt --allow-root "${gpu_user[@]}" || gpu_cmd+=(--allow-root)
+      has_opt --no-tui "${gpu_user[@]}"     || gpu_cmd+=(--no-tui)
+      has_opt --no-color "${gpu_user[@]}"   || gpu_cmd+=(--no-color)
+      ;;
   esac
   # Les mineurs autres que SRBMiner ecrivent sur leur sortie : elle est gardee dans un
   # fichier (recopie dans les logs du conteneur) pour que le hashrate puisse y etre lu.
@@ -379,6 +397,8 @@ hr_ignore="${SALAD_HASHRATE_IGNORE:-network|difficulty|diff=|pool hashrate|rewar
 if [[ -z "$hr_match" ]]; then
   case "$gpu_miner" in
     ariaenergy) hr_match='^\[stats\]' ;;
+    # FearMiner : « hashrate 618.4 MH/s (10m 611.9, session 609.8, eff 598.2 / 97.8 %) ».
+    fearminer)  hr_match='hashrate' ;;
     *) hr_match='.' ;;
   esac
 fi

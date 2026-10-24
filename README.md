@@ -3,8 +3,8 @@
 Image Docker pour miner sur des machines louées (vast.ai, SaladCloud, Clore.ai…) :
 
 - **GPU NVIDIA** : SRBMiner-MULTI, ForgeMiner, OneZeroMiner, PeakMiner, lpminer, ARIAEnergy
-  PRL ou WildRig Multi (Pearl, Quantus… selon le mineur ; WildRig : vast.ai et hôtes Linux
-  seulement, voir plus bas) ;
+  PRL, WildRig Multi ou FearMiner (Pearl, Quantus… selon le mineur ; WildRig : vast.ai et
+  hôtes Linux seulement, voir plus bas) ;
 - **CPU** : XMRig ou SRBMiner-MULTI.
 
 GPU seul, CPU seul ou les deux : **rien ne démarre sans choix explicite**. Les arguments
@@ -19,8 +19,8 @@ Le workflow GitHub (`.github/workflows/build.yml`) :
 
 1. cherche la **dernière version stable** de chaque mineur sur sa page GitHub officielle
    (`doktor83/SRBMiner-Multi`, `xmrig/xmrig`, `0xHashRaptor/ForgeMiner`,
-   `OneZeroMiner/onezerominer`, `peakminer/peakminer`, `andru-kun/wildrig-multi`) ;
-   lpminer (Quantus, LuckyPool,
+   `OneZeroMiner/onezerominer`, `peakminer/peakminer`, `andru-kun/wildrig-multi`,
+   `fearminer/fearminer`) ; lpminer (Quantus, LuckyPool,
    `eu.lproute.com`) et ARIAEnergy PRL (`dl.ariabrain.com`) ne sont pas sur GitHub : leur
    version, leur URL et leur empreinte sont **figées** dans `scripts/resolve-versions.sh`
    (nouvelle version = changer la ligne) ;
@@ -57,7 +57,7 @@ relance simplement le workflow.
 
 | Variable | Valeurs | Rôle |
 |---|---|---|
-| `GPU_MINER` | `srbminer`, `forgeminer`, `onezerominer`, `peakminer`, `lpminer`, `ariaenergy` ou `wildrig` | XMRig ne mine que sur CPU |
+| `GPU_MINER` | `srbminer`, `forgeminer`, `onezerominer`, `peakminer`, `lpminer`, `ariaenergy`, `wildrig` ou `fearminer` | XMRig ne mine que sur CPU |
 | `GPU_ARGS` | | arguments du mineur GPU, tels quels, dans sa propre syntaxe (voir [Mineurs GPU](#mineurs-gpu)) |
 | `CPU_MINER` | `xmrig` ou `srbminer` | |
 | `CPU_ARGS` | | arguments du mineur CPU, tels quels |
@@ -96,6 +96,7 @@ dans un conteneur. **Une option déjà présente dans tes arguments n'est pas aj
 | lpminer | variable `LP_DISABLE_HOTKEYS=1` (et ses bibliothèques `lib/`) | pas de clavier dans un conteneur |
 | ARIAEnergy PRL | lancé par `run-all.sh` : un processus par carte visible, `--worker NOM-gpuN` s'il y a plusieurs cartes | le mineur ne mine qu'une carte par processus |
 | WildRig Multi | `--no-color`, `--opencl-platforms nvidia`, `--print-time 30` | logs lisibles ; cartes NVIDIA seulement ; une ligne de hashrate toutes les 30 s |
+| FearMiner | `--allow-root`, `--no-tui`, `--no-color` | il refuse de tourner en root sans cette option, et l'image tourne en root ; journal brut lisible |
 | tous les mineurs GPU | leur sortie est gardée dans un fichier (`gpu-<mineur>.log`, recopié dans les logs) | le hashrate y est lu (chien de garde, ligne `GPU0 … H/s` pour les outils) |
 | SRBMiner CPU | `--disable-gpu`, `--disable-numa-binding`, `--log-file` | CPU seulement ; voir « machines à plusieurs processeurs » |
 | XMRig | `--randomx-no-numa`, `--no-color` | idem ; logs lisibles |
@@ -126,6 +127,7 @@ Pearl `prl.kryptex.network:7048`, HeroMiners Pearl `de.pearl.herominers.com:1200
 | `lpminer` | lpminerquantus (LuckyPool) | Quantus seulement, sur LuckyPool ; frais non documentés | `--algo quantus --pool POOL:PORT --wallet ADRESSE --worker NOM` |
 | `ariaenergy` | ARIAEnergy PRL | Pearl seulement (2 % : 120 s toutes les 100 min) | `--pool POOL:PORT --wallet ADRESSE --worker NOM` |
 | `wildrig` | WildRig Multi | Pearl `pearlhash` (0 %, voir plus bas) ; pas de Quantus (son `qhash` est QubitCoin) | `-a pearlhash -o POOL:PORT -u ADRESSE.NOM` (worker dans le wallet) |
+| `fearminer` | FearMiner | Pearl `pearl` (1,5 %), Quantus `quantus` (1,5 %) ; moteurs signés mis à jour tout seuls, voir plus bas | `-a pearl -o stratum+ssl://POOL:PORT -u ADRESSE -w NOM` / `-a quantus -o POOL:PORT -u ADRESSE -w NOM` |
 
 Pour Pearl avec ForgeMiner / OneZeroMiner : `pearlhash` à la place de `quantus` ; avec
 PeakMiner : `--coin pearl`. Attention, ForgeMiner et OneZeroMiner ont aussi un `qhash` :
@@ -136,7 +138,8 @@ qu'elle a ; un mineur qui le refuse s'arrête et se relance en boucle, lis ses l
 les logs) : lpminer **580 ou plus** (CUDA 13.2) ; ForgeMiner 580+ pour les RTX 50 ;
 OneZeroMiner 528+ ; PeakMiner et SRBMiner embarquent leur runtime ; ARIAEnergy PRL
 embarque deux builds (CUDA 13 à partir du pilote 580, CUDA 12 pour 525 à 579) et choisit
-seul, RTX 3000 ou plus récente ; WildRig 450.80 ou plus.
+seul, RTX 3000 ou plus récente ; WildRig 450.80 ou plus ; FearMiner 550 ou plus (570 pour les
+RTX 50), Pearl seulement sur RTX 30, 40 et 50.
 
 **WildRig Multi ne parle que OpenCL, jamais CUDA : vast.ai et hôtes Linux seulement.** Sur un
 hôte Linux, le runtime NVIDIA injecte le pilote OpenCL de la carte dans le conteneur et
@@ -162,6 +165,38 @@ l'utilise pas sur Salad. À savoir aussi :
   sa ligne de hashrate est lue par le filtre générique (vérifie `Lecture du hashrate
   (wildrig)` dans les logs).
 
+**FearMiner mine Pearl et Quantus avec des « moteurs » qu'il met à jour lui-même.** Le binaire
+`fearminer` ne hache rien : chaque algorithme est un moteur signé par l'éditeur
+(`fearminer-engine-<algo>`), téléchargé depuis `download.fearminer.com`, vérifié contre un
+index signé, et remis à jour toutes les heures (un moteur plus récent est auto-testé puis
+remplace l'ancien entre deux jobs, avec retour arrière s'il mine plus lentement). L'image
+garde la graine de moteurs de l'archive à côté du binaire : le premier démarrage mine même
+sans réseau, mais la version qui mine ensuite n'est plus forcément celle de l'image. Pour
+figer un moteur : `--engine pearl=VERSION` dans tes arguments. À savoir aussi :
+
+- **Root** : FearMiner refuse de tourner en root sans `--allow-root` ; l'image tourne en root
+  et ajoute l'option, comme le paquet HiveOS de l'éditeur.
+- **Télémétrie** : toutes les 15 min, un rapport anonyme part vers `telemetry.fearminer.com`
+  (modèles de carte et de processeur, fourchette de hashrate, nom de la pool ; jamais le
+  wallet ni le worker). L'image ne touche pas à ce réglage : ajoute `--no-telemetry` à tes
+  arguments pour la couper. Les frais, 1,5 % sur Pearl et Quantus, sont lus sur
+  `cfg.fearminer.com` et affichés dans la ligne `fee` au démarrage.
+- **Cartes** : pilote 550 ou plus (570 pour les RTX 50) ; Pearl seulement sur RTX 30, 40 et
+  50, pas de RTX 20 ni de V100. Une carte sous ces planchers est **écartée sans que le mineur
+  s'arrête** (lignes `E308`, `E310` ou `E324`) : il tourne à vide en surveillant les cartes,
+  l'image ne le relance donc pas ; sur Salad, les règles « lectures à 0 » et « plus de
+  statistiques » du chien de garde rattrapent le cas.
+- **Pool** : `stratum+ssl://POOL:PORT` pour un port TLS, `stratum+tcp://POOL:PORT` ou
+  `POOL:PORT` nu pour un port en clair ; plusieurs `-o` = secours. La pool Pearl doit parler
+  le stratum Pearl « v2 ». Worker : `-w NOM`, ou dans le wallet `-u ADRESSE.NOM`.
+- **Hashrate** : sa ligne `hashrate 618.4 MH/s (10m 611.9, session 609.8, eff 598.2 / 97.8 %)`
+  est lue par le filtre générique (filtre `hashrate`). Pour Pearl, sa documentation parle d'une
+  unité « T » (10^12 multiplications-accumulations par seconde) : si sa ligne n'a pas de
+  « H/s », la lecture générique ne la voit pas ; envoie la ligne, une lecture dédiée sera
+  écrite (son API locale, `127.0.0.1:4300`, expose aussi `/stats` et `/hive-stats`).
+- Son archive et ses lignes n'ont pas encore été vues en vrai : la construction vérifie le
+  binaire, ses bibliothèques et la présence du dossier `engines`.
+
 **ARIAEnergy PRL mine une carte par processus.** L'image s'en charge : avec une seule carte
 visible (Salad), le mineur est lancé tel quel ; avec plusieurs (rig vast.ai), un processus
 par carte, le worker suffixé `-gpu0`, `-gpu1`… (la pool montre chaque carte), chaque ligne
@@ -182,6 +217,7 @@ vérifier que la bonne ligne est prise.
 | Mineur | Ligne lue (filtre par défaut) |
 |---|---|
 | ARIAEnergy PRL | `[stats] 113.75 TH/s \| accepted 33 rejected 0 dropped 1 \| …` (filtre `^\[stats\]`) |
+| FearMiner | `hashrate 618.4 MH/s (10m 611.9, session 609.8, eff 598.2 / 97.8 %)` (filtre `hashrate` ; unité Pearl à vérifier, voir plus haut) |
 | ForgeMiner, OneZeroMiner, PeakMiner, lpminer, WildRig | dernière ligne contenant un hashrate, hors lignes `network`, `difficulty`, `diff=`, `pool hashrate`, `reward` (à vérifier en mode `observe` sur leurs vraies lignes ; WildRig : sur vast.ai, dans la ligne `Lecture du hashrate`) |
 
 Deux variables pour corriger un filtre sans reconstruire l'image : `SALAD_HASHRATE_MATCH`
@@ -225,6 +261,13 @@ GPU_MINER=lpminer
 GPU_ARGS=--algo quantus --pool pl.lproute.com:5660 --wallet ADRESSE_QUANTUS --worker FARM
 ```
 
+**Quantus (GPU, FearMiner)** :
+
+```
+GPU_MINER=fearminer
+GPU_ARGS=-a quantus -o pl.lproute.com:5660 -u ADRESSE_QUANTUS -w FARM
+```
+
 **Pearl (GPU, ARIAEnergy PRL)** :
 
 ```
@@ -237,6 +280,13 @@ GPU_ARGS=--pool de.pearl.herominers.com:1200 --wallet ADRESSE_PEARL --worker FAR
 ```
 GPU_MINER=wildrig
 GPU_ARGS=-a pearlhash -o de.pearl.herominers.com:1200 -u ADRESSE_PEARL.FARM
+```
+
+**Pearl (GPU, FearMiner)** :
+
+```
+GPU_MINER=fearminer
+GPU_ARGS=-a pearl -o de.pearl.herominers.com:1200 -u ADRESSE_PEARL -w FARM
 ```
 
 **Pearl (GPU) + Monero (CPU, XMRig)** :
@@ -348,7 +398,8 @@ tous les replicas.
   (XMRig : 1 % ; SRBMiner : selon l'algorithme, 2 % pour pearlhash, 0,85 % pour
   randomdrgx ; ForgeMiner 2 % ; OneZeroMiner 1 % pearlhash / 2 % quantus ; PeakMiner 2 % ;
   ARIAEnergy PRL 2 % ; WildRig 0 % pearlhash d'après son README, voir « Mineurs GPU » ;
-  lpminer : non documentés). Compare les mineurs sur le hashrate vu par la pool.
+  FearMiner 1,5 % Pearl et Quantus ; lpminer : non documentés). Compare les mineurs sur le
+  hashrate vu par la pool.
 - **Mineur CPU en conteneur** : les messages sur les « huge pages » et les registres
   « MSR » sont normaux. Ces optimisations demandent des droits que seul l'hôte a ; sans
   elles, RandomX perd environ 10 à 20 %.
@@ -375,7 +426,13 @@ tous les replicas.
   sur une version trop ancienne, pool injoignable, pilote NVIDIA trop ancien pour lpminer
   ou ForgeMiner…).
 - **`GPU_MINER=... inconnu`** : valeurs possibles `srbminer`, `forgeminer`, `onezerominer`,
-  `peakminer`, `lpminer`, `ariaenergy`, `wildrig`.
+  `peakminer`, `lpminer`, `ariaenergy`, `wildrig`, `fearminer`.
+- **FearMiner tourne mais ne mine pas** (pas de ligne `hashrate`, lignes `E308`, `E310` ou
+  `E324`) : la carte est écartée, pilote trop ancien (550 ou plus, 570 pour les RTX 50),
+  mémoire libre insuffisante ou carte non prise en charge pour Pearl (RTX 30, 40 et 50
+  seulement). Le mineur ne s'arrête pas, l'image ne le relance donc pas : change de machine
+  ou de mineur. Lignes `E32x` : problème de moteur (index signé ou téléchargement), voir
+  « Mineurs GPU ».
 - **WildRig s'arrête aussitôt en disant qu'il ne trouve aucune carte ou aucune plateforme
   OpenCL** : l'hôte n'expose pas d'OpenCL NVIDIA. Sur SaladCloud (WSL2) c'est normal, WildRig
   n'y marche pas : prends un autre mineur. Sur vast.ai, vérifie que `nvidia-smi` marche dans
